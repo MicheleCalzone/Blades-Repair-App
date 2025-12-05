@@ -1,0 +1,49 @@
+.page-report-list {
+
+  .btn-add-report {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .row-filter {
+    display: flex;
+    justify-content: space-between;
+    margin: 20px 0 40px;
+
+    .filters {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+  }
+
+
+  .reports-table {
+    width: 100%;
+
+    thead {
+      text-align: left;
+    }
+
+    tbody {
+
+      .report-title {
+        font-weight: bold;
+        cursor: pointer;
+      }
+
+      .td-action {
+        display: flex;
+        gap: 10px;
+
+        .action-btn {
+          svg {
+            width: 20px;
+            height: 20px;
+          }
+        }
+      }
+    }
+  }
+}
