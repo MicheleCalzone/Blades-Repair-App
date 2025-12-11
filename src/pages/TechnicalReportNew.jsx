@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Editor } from "@tinymce/tinymce-react";
-import IconEdit from "../assets/IconEdit.jsx";
 import IconTrash from "../assets/IconTrash.jsx";
+import IconEdit from "../assets/IconEdit.jsx";
 import { useTechnicalReports } from "../hooks/useTechnicalReports";
 
 const TechnicalReportsNew = () => {
@@ -50,7 +50,6 @@ const TechnicalReportsNew = () => {
 
     const handleTitleChange = (e) => setTitle(e.target.value);
 
-    // --- Blade handlers rimangono invariati ---
     const addBladeItem = (blade) => {
         setBlades(prev => ({
             ...prev,
@@ -128,6 +127,8 @@ const TechnicalReportsNew = () => {
             <h1>{reportToEdit ? "Modifica Report Tecnico" : "Creazione Report Tecnico"}</h1>
 
             <form className="report-form" onSubmit={handleSubmit}>
+
+                {/* --- Titolo --- */}
                 <fieldset>
                     <legend>Titolo Report</legend>
                     <div className="form-group">
@@ -140,6 +141,7 @@ const TechnicalReportsNew = () => {
                     </div>
                 </fieldset>
 
+                {/* --- Info --- */}
                 <fieldset>
                     <legend>Informazioni Report</legend>
                     {Object.entries(info).map(([key, value]) => (
@@ -155,7 +157,7 @@ const TechnicalReportsNew = () => {
                     ))}
                 </fieldset>
 
-                {/* --- Blades section rimane invariata per ora --- */}
+                {/* --- Blades --- */}
                 {["A", "B", "C"].map(blade => (
                     <fieldset key={blade}>
                         <legend>Blade {blade}</legend>
@@ -189,6 +191,81 @@ const TechnicalReportsNew = () => {
                                         onChange={(e) => handleBladeItemChange(blade, index, "task", e.target.value)}
                                     />
                                 </div>
+
+                                {/* --- Editor --- */}
+                                <Editor
+                                    value={item.description}
+                                    init={{
+                                        height: 200,
+                                        menubar: false,
+                                        plugins: ['advlist', 'lists', 'link', 'image', 'code'],
+                                        toolbar: 'undo redo | bold italic | bullist numlist | link image | code',
+                                        branding: false,
+                                        base_url: "/tinymce/js/tinymce",
+                                        suffix: ".min",
+                                        skin: "oxide",
+                                        skin_url: "/tinymce/js/tinymce/skins/ui/oxide",
+                                        content_css: "/tinymce/js/tinymce/skins/content/default/content.css",
+                                        license_key: "gpl",
+                                        tinymce_script_src: "/tinymce/js/tinymce/tinymce.min.js",
+                                    }}
+                                    onEditorChange={(content) => handleBladeItemChange(blade, index, "description", content)}
+                                />
+
+                                {/* --- FOTO --- */}
+                                <div className="form-group dropzone" onDrop={(e) => handleDrop(e, blade, index)} onDragOver={handleDragOver}>
+                                    <label>Upload Foto</label>
+                                    <input
+                                        type="file"
+                                        multiple
+                                        onChange={(e) => handlePhotoUpload(blade, index, Array.from(e.target.files))}
+                                    />
+
+                                    <div className="photo-preview">
+                                        {item.photos.map((file, i) => {
+                                            let src;
+                                            if (typeof file === "string") {
+                                                // URL remoto o locale
+                                                src = file;
+                                            } else {
+                                                // file locale appena caricato
+                                                src = URL.createObjectURL(file);
+                                            }
+
+                                            return (
+                                                <div className="photo-item" key={i}>
+                                                    <img src={src} className="photo-thumb" alt={`Foto ${i + 1}`} />
+
+                                                    <div className="photo-actions">
+                                                        {/* Matitina */}
+                                                        <label className="btn-edit">
+                                                            <IconEdit />
+                                                            <input
+                                                                type="file"
+                                                                accept="image/*"
+                                                                style={{ display: "none" }}
+                                                                onChange={(e) => {
+                                                                    const newFile = e.target.files[0];
+                                                                    if (!newFile) return;
+                                                                    const updated = [...blades[blade]];
+                                                                    updated[index].photos[i] = newFile;
+                                                                    setBlades(prev => ({ ...prev, [blade]: updated }));
+                                                                }}
+                                                            />
+                                                        </label>
+
+                                                        {/* Cestino */}
+                                                        <button type="button" className="btn-delete" onClick={() => removePhoto(blade, index, i)}>
+                                                            <IconTrash />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                                {/* --- FINE FOTO --- */}
+
                             </div>
                         ))}
 
@@ -199,6 +276,7 @@ const TechnicalReportsNew = () => {
                 <div className="form-actions">
                     <button type="submit" className="btn btn-save">{reportToEdit ? "Aggiorna Report" : "Salva Report"}</button>
                 </div>
+
             </form>
         </div>
     );

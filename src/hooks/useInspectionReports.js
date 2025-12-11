@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 
-const API_INSPECTION_REPORTS = "https://mirodesign.it/off-line/blades-repair/wp-json/pods/v1/points_image";
+const API_INSPECTION_REPORTS = "https://mirodesign.it/off-line/blades-repair/wp-json/wp/v2/points_image";
 
 const useInspectionReports = () => {
     const [reports, setReports] = useState([]);

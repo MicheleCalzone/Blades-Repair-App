@@ -3,7 +3,6 @@ import { useState, useEffect } from "react";
 const API_REPORT_TECNICI = "https://mirodesign.it/off-line/blades-repair/wp-json/wp/v2/report-tecnici";
 
 const formatDateForInput = (dateStr) => {
-    // converte da DD.MM.YY → YYYY-MM-DD
     if (!dateStr) return "";
     const parts = dateStr.split(".");
     if (parts.length !== 3) return "";
@@ -16,6 +15,18 @@ export const useTechnicalReports = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
+    // Recupera URL foto da API WP Media
+    const fetchPhotoUrl = async (id) => {
+        try {
+            const res = await fetch(`https://mirodesign.it/off-line/blades-repair/wp-json/wp/v2/media/${id}`);
+            if (!res.ok) return null;
+            const data = await res.json();
+            return data.source_url || null;
+        } catch {
+            return null;
+        }
+    };
+
     const loadReports = async () => {
         setLoading(true);
         try {
@@ -26,12 +37,29 @@ export const useTechnicalReports = () => {
             if (!res.ok) throw new Error("Errore recupero report tecnici");
             const data = await res.json();
 
-            // Prepara i dati: converte date e struttura blades
-            const prepared = data.map(r => {
+            const prepared = await Promise.all(data.map(async (r) => {
                 const meta = r.meta || {};
+
+                const parseBladeItems = async (items, bladeLetter) => {
+                    if (!items || !Array.isArray(items)) return [];
+                    return await Promise.all(items.map(async (item) => {
+                        // Recupera URL foto
+                        const photoIds = item[`photo_${bladeLetter.toLowerCase()}`] || [];
+                        const photos = await Promise.all(photoIds.map(id => fetchPhotoUrl(id)));
+
+                        return {
+                            radius: item.radius || "",
+                            position: item.position || "",
+                            task: item.completed_task || "",
+                            description: item[`editor_${bladeLetter.toLowerCase()}`] || "",
+                            photos: photos.filter(p => p), // solo URL validi
+                        };
+                    }));
+                };
+
                 return {
                     id: r.id,
-                    title: r.title.rendered || "",
+                    title: r.title?.rendered || "",
                     info: {
                         customer: meta.customer || "",
                         windfarm: meta.windfarm || "",
@@ -45,32 +73,14 @@ export const useTechnicalReports = () => {
                         reportDate: formatDateForInput(meta.report_issue_date),
                     },
                     blades: {
-                        A: meta.items_of_blade_a ? [{
-                            radius: meta.items_of_blade_a.radius || "",
-                            position: meta.items_of_blade_a.position || "",
-                            task: meta.items_of_blade_a.completed_task || "",
-                            description: meta.items_of_blade_a.editor_a || "",
-                            photos: meta.items_of_blade_a.photo_a || []
-                        }] : [],
-                        B: meta.items_of_blade_b ? [{
-                            radius: meta.items_of_blade_b.radius || "",
-                            position: meta.items_of_blade_b.position || "",
-                            task: meta.items_of_blade_b.completed_task || "",
-                            description: meta.items_of_blade_b.editor_b || "",
-                            photos: meta.items_of_blade_b.photo_b || []
-                        }] : [],
-                        C: meta.items_of_blade_c ? [{
-                            radius: meta.items_of_blade_c.radius || "",
-                            position: meta.items_of_blade_c.position || "",
-                            task: meta.items_of_blade_c.completed_task || "",
-                            description: meta.items_of_blade_c.editor_c || "",
-                            photos: meta.items_of_blade_c.photo_c || []
-                        }] : [],
+                        A: await parseBladeItems(meta.items_of_blade_a, "A"),
+                        B: await parseBladeItems(meta.items_of_blade_b, "B"),
+                        C: await parseBladeItems(meta.items_of_blade_c, "C"),
                     },
                     synced: true,
                     lastModified: r.modified,
                 };
-            });
+            }));
 
             setReports(prepared);
             localStorage.setItem("technicalReports", JSON.stringify(prepared));
