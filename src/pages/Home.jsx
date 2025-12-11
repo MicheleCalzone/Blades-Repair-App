@@ -19,7 +19,7 @@ const Home = () => {
                     </div>
 
                     <div className="box-btn">
-                        <button class="btn" onClick={() => navigate("/inspection-reports/new")}>
+                        <button className="btn" onClick={() => navigate("/inspection-reports/new")}>
                             <div className="btn-icon">
                                 <IconReportAdd className="icon"/>
                             </div>
@@ -28,7 +28,7 @@ const Home = () => {
                             </div>
                         </button>
 
-                        <button class="btn" onClick={() => navigate("/inspection-reports")}>
+                        <button className="btn" onClick={() => navigate("/inspection-reports")}>
                             <div className="btn-icon">
                                 <IconReportList className="icon"/>
                             </div>
@@ -48,7 +48,7 @@ const Home = () => {
                     </div>
 
                     <div className="box-btn">
-                        <button class="btn" onClick={() => navigate("/technical-reports/new")}>
+                        <button className="btn" onClick={() => navigate("/technical-reports/new")}>
                             <div className="btn-icon">
                                 <IconReportAdd className="icon"/>
                             </div>
@@ -56,7 +56,7 @@ const Home = () => {
                                 Create new report
                             </div>
                         </button>
-                        <button class="btn" onClick={() => navigate("/technical-reports")}>
+                        <button className="btn" onClick={() => navigate("/technical-reports")}>
                             <div className="btn-icon">
                                 <IconReportList className="icon"/>
                             </div>

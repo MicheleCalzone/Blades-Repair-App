@@ -1,41 +1,76 @@
-// src/hooks/useInspectionReports.js
 import { useState, useEffect } from "react";
+
+const API_INSPECTION_REPORTS = "https://mirodesign.it/off-line/blades-repair/wp-json/pods/v1/points_image";
 
 const useInspectionReports = () => {
     const [reports, setReports] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    useEffect(() => {
-        const fetchReports = async () => {
-            setLoading(true);
-            try {
-                //const res = await fetch("https://www.blades-repair.com/wp-json/pods/v1/points_image");
-                const res = await fetch("https://mirodesign.it/off-line/blades-repair/wp-json/wp/v2/points_image");
-                if (!res.ok) throw new Error("Errore nel caricamento dei report di ispezione");
-                const data = await res.json();
-                setReports(data);
-            } catch (err) {
-                setError(err.message);
-            } finally {
-                setLoading(false);
+    // Carica dai localStorage o server
+    const loadReports = async () => {
+        setLoading(true);
+        try {
+            const offlineData = localStorage.getItem("inspectionReports");
+            if (offlineData) {
+                setReports(JSON.parse(offlineData));
             }
-        };
 
-        fetchReports();
+            const res = await fetch(API_INSPECTION_REPORTS);
+            if (!res.ok) throw new Error("Errore caricamento report di ispezione");
+            const data = await res.json();
+
+            setReports(data);
+            localStorage.setItem("inspectionReports", JSON.stringify(data));
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Salvataggio offline
+    const saveReportOffline = (report) => {
+        const updated = [...reports, report];
+        setReports(updated);
+        localStorage.setItem("inspectionReports", JSON.stringify(updated));
+    };
+
+    // Sincronizzazione quando torni online
+    const syncReports = async () => {
+        if (!navigator.onLine) return;
+
+        try {
+            const offlineReports = JSON.parse(localStorage.getItem("inspectionReports")) || [];
+
+            for (const report of offlineReports) {
+                if (!report.synced) {
+                    await fetch(API_INSPECTION_REPORTS, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(report),
+                    });
+                    report.synced = true;
+                }
+            }
+
+            // Aggiorna localStorage
+            localStorage.setItem("inspectionReports", JSON.stringify(offlineReports));
+            setReports(offlineReports);
+        } catch (err) {
+            console.error("Errore sincronizzazione report:", err);
+        }
+    };
+
+    useEffect(() => {
+        loadReports();
+        window.addEventListener("online", syncReports);
+        return () => {
+            window.removeEventListener("online", syncReports);
+        };
     }, []);
 
-    const deleteReport = (id) => {
-        setReports((prev) => prev.filter((r) => r.id !== id));
-    };
-
-    return {
-        reports,
-        loading,
-        error,
-        deleteReport,
-        setReports, // opzionale se vuoi aggiornare dall’esterno
-    };
+    return { reports, setReports, loading, error, saveReportOffline, syncReports };
 };
 
 export default useInspectionReports;

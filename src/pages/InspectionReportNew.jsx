@@ -1,11 +1,8 @@
-// Full React page with TinyMCE (initialized on modal open), draggable hotspots,
-// thumbnail preview for uploaded photos, dynamic blade images, and complete structure.
-// NOTE: Adjust the image paths and TinyMCE base_url based on your project.
-
 import React, { useState, useEffect } from "react";
 import { Editor } from "@tinymce/tinymce-react";
+import useInspectionReports from "../hooks/useInspectionReports";
 
-const TechnicalReportsNew = () => {
+const InspectionReportsNew = () => {
     const emptyDamage = {
         description: "",
         shortDescription: "",
@@ -17,7 +14,10 @@ const TechnicalReportsNew = () => {
         previews: [],
         x: 50,
         y: 50,
+        synced: false, // nuovo flag
     };
+
+    const { reports, setReports } = useInspectionReports();
 
     const [info, setInfo] = useState({
         windFarm: "",
@@ -30,19 +30,18 @@ const TechnicalReportsNew = () => {
     });
 
     const [blades, setBlades] = useState({ A: [], B: [], C: [] });
-
     const [modalOpen, setModalOpen] = useState(false);
     const [currentBlade, setCurrentBlade] = useState(null);
     const [currentDamageIndex, setCurrentDamageIndex] = useState(null);
     const [newDamage, setNewDamage] = useState(emptyDamage);
 
-    /* ------------------------------ CHANGE INFO ------------------------------ */
+    /* -------------------------- Gestione info -------------------------- */
     const handleInfoChange = (e) => {
         const { name, value } = e.target;
         setInfo((prev) => ({ ...prev, [name]: value }));
     };
 
-    /* -------------------------- ADD NEW HOTSPOT ONLY ------------------------- */
+    /* -------------------------- Blade damages ------------------------- */
     const addBladeDamage = (blade) => {
         const newSpot = { ...emptyDamage, x: 50, y: 50 };
         setBlades((prev) => ({
@@ -51,7 +50,6 @@ const TechnicalReportsNew = () => {
         }));
     };
 
-    /* ---------------------------- CLICK HOTSPOT ------------------------------- */
     const handleHotspotClick = (blade, index) => {
         const damage = blades[blade][index];
         setCurrentBlade(blade);
@@ -60,7 +58,6 @@ const TechnicalReportsNew = () => {
         setModalOpen(true);
     };
 
-    /* ---------------------------- DRAG HOTSPOT ------------------------------- */
     const handleDrag = (e, blade, index) => {
         const container = e.target.parentNode.getBoundingClientRect();
 
@@ -74,21 +71,16 @@ const TechnicalReportsNew = () => {
         setBlades((prev) => ({ ...prev, [blade]: updated }));
     };
 
-    /* ------------------------------- SAVE DAMAGE ------------------------------ */
     const saveDamage = () => {
         const updated = [...blades[currentBlade]];
         updated[currentDamageIndex] = newDamage;
-
         setBlades((prev) => ({ ...prev, [currentBlade]: updated }));
         setModalOpen(false);
     };
 
-    /* ----------------------------- PHOTO UPLOAD ------------------------------ */
     const handlePhotoUpload = (e) => {
         const files = Array.from(e.target.files).slice(0, 5);
-
         const previews = files.map((file) => URL.createObjectURL(file));
-
         setNewDamage((prev) => ({
             ...prev,
             photos: files,
@@ -99,97 +91,94 @@ const TechnicalReportsNew = () => {
     const removePhoto = (index) => {
         const newPhotos = [...newDamage.photos];
         const newPreviews = [...newDamage.previews];
-
         newPhotos.splice(index, 1);
         newPreviews.splice(index, 1);
-
         setNewDamage((prev) => ({ ...prev, photos: newPhotos, previews: newPreviews }));
     };
 
-    /* ----------------------------- SUBMIT REPORT ----------------------------- */
+    /* -------------------------- SALVATAGGIO REPORT ------------------------- */
     const handleSubmit = (e) => {
         e.preventDefault();
-        console.log("INFO", info);
-        console.log("BLADE DAMAGES", blades);
-        alert("Report salvato (demo)");
+
+        const report = {
+            id: Date.now(),
+            info,
+            blades,
+            synced: false, // flag per sincronizzazione
+        };
+
+        // salva localmente
+        const updatedReports = [...reports, report];
+        setReports(updatedReports);
+        localStorage.setItem("inspectionReports", JSON.stringify(updatedReports));
+
+        alert("Report salvato offline!");
     };
 
-    /* --------------------------- RENDER COMPONENT ---------------------------- */
+    /* -------------------------- RENDER PAGE ------------------------- */
     return (
         <div className="page-container page-inspection-report-new">
             <h1>Creazione Report Ispezioni</h1>
 
             <form onSubmit={handleSubmit}>
-                {/* LOCATION */}
+                {/* Info base */}
                 <fieldset>
                     <legend>Location</legend>
-                    <div className="form-group">
-                        <label>Wind Farm</label>
-                        <input name="windFarm" value={info.windFarm} onChange={handleInfoChange} />
-                    </div>
-                    <div className="form-group">
-                        <label>Customer</label>
-                        <input name="customer" value={info.customer} onChange={handleInfoChange} />
-                    </div>
-                    <div className="form-group">
-                        <label>Date</label>
-                        <input type="date" name="date" value={info.date} onChange={handleInfoChange} />
-                    </div>
+                    {["windFarm", "customer", "date"].map((key) => (
+                        <div className="form-group" key={key}>
+                            <label>{key}</label>
+                            <input
+                                type={key === "date" ? "date" : "text"}
+                                name={key}
+                                value={info[key]}
+                                onChange={handleInfoChange}
+                            />
+                        </div>
+                    ))}
                 </fieldset>
 
-                {/* TURBINE */}
+                {/* Turbine */}
                 <fieldset>
                     <legend>Turbine</legend>
-
-                    <div className="form-group">
-                        <label>Wind Turbine</label>
-                        <input name="windTurbine" value={info.windTurbine} onChange={handleInfoChange} />
-                    </div>
+                    {["windTurbine", "bladeNumber"].map((key) => (
+                        <div className="form-group" key={key}>
+                            <label>{key}</label>
+                            <input name={key} value={info[key]} onChange={handleInfoChange} />
+                        </div>
+                    ))}
 
                     <div className="form-group">
                         <label>Blade Type</label>
                         <div className="radio-group">
-                            <label>
-                                <input
-                                    type="radio"
-                                    name="bladeType"
-                                    value="Enercon"
-                                    checked={info.bladeType === "Enercon"}
-                                    onChange={handleInfoChange}
-                                /> Enercon
-                            </label>
-                            <label>
-                                <input
-                                    type="radio"
-                                    name="bladeType"
-                                    value="Other"
-                                    checked={info.bladeType === "Other"}
-                                    onChange={handleInfoChange}
-                                /> Other
-                            </label>
+                            {["Enercon", "Other"].map((type) => (
+                                <label key={type}>
+                                    <input
+                                        type="radio"
+                                        name="bladeType"
+                                        value={type}
+                                        checked={info.bladeType === type}
+                                        onChange={handleInfoChange}
+                                    />
+                                    {type}
+                                </label>
+                            ))}
                         </div>
-                    </div>
-
-                    <div className="form-group">
-                        <label>Blade Number</label>
-                        <input name="bladeNumber" value={info.bladeNumber} onChange={handleInfoChange} />
                     </div>
                 </fieldset>
 
-                {/* BLADE A/B/C */}
-                {(["A", "B", "C"]).map((blade) => (
+                {/* Blade damages */}
+                {["A", "B", "C"].map((blade) => (
                     <fieldset key={blade}>
                         <legend>Blade {blade}</legend>
-
-                        <button type="button" className="add-damage-btn" onClick={() => addBladeDamage(blade)}>
+                        <button type="button" onClick={() => addBladeDamage(blade)}>
                             + Aggiungi Danno
                         </button>
 
                         <div className="blade-image-container">
                             <img
                                 src={`/images/pala_${info.bladeType.toLowerCase()}.jpg`}
-                                className="blade-image"
                                 alt={`Blade ${blade}`}
+                                className="blade-image"
                             />
 
                             {blades[blade].map((damage, i) => (
@@ -216,7 +205,7 @@ const TechnicalReportsNew = () => {
                     </fieldset>
                 ))}
 
-                {/* INSPECTOR */}
+                {/* Inspector */}
                 <fieldset>
                     <legend>Inspector</legend>
                     <div className="form-group">
@@ -225,18 +214,18 @@ const TechnicalReportsNew = () => {
                     </div>
                 </fieldset>
 
-                <button type="submit" className="save-btn">Salva Report</button>
+                <button type="submit" className="save-btn">
+                    Salva Report
+                </button>
             </form>
 
-            {/* MODALE */}
+            {/* Modale */}
             {modalOpen && (
                 <div className="modal-overlay">
                     <div className="modal-content">
-                        <h3>{currentDamageIndex !== null ? "Modifica Danno" : "Nuovo Danno"}</h3>
-
+                        <h3>Modifica Danno</h3>
                         <label>Description</label>
                         <Editor
-                            key={currentDamageIndex}
                             value={newDamage.description}
                             init={{
                                 height: 200,
@@ -267,11 +256,9 @@ const TechnicalReportsNew = () => {
                             value={newDamage.priority}
                             onChange={(e) => setNewDamage({ ...newDamage, priority: e.target.value })}
                         >
-                            <option>Low</option>
-                            <option>Medium</option>
-                            <option>High</option>
-                            <option>Critical</option>
-                            <option>Urgent</option>
+                            {["Low", "Medium", "High", "Critical", "Urgent"].map((p) => (
+                                <option key={p}>{p}</option>
+                            ))}
                         </select>
 
                         <label>Radius</label>
@@ -304,41 +291,17 @@ const TechnicalReportsNew = () => {
                                 return (
                                     <div className="photo-item" key={i}>
                                         <img src={imgUrl} alt="" className="photo-thumb" />
-
-                                        <div className="photo-actions">
-                                            {/* Modifica foto */}
-                                            <label className="btn-edit-photo">
-                                                ✎
-                                                <input
-                                                    type="file"
-                                                    accept="image/*"
-                                                    hidden
-                                                    onChange={(e) => {
-                                                        const updated = [...newDamage.photos];
-                                                        updated[i] = e.target.files[0];
-                                                        setNewDamage((prev) => ({ ...prev, photos: updated }));
-                                                    }}
-                                                />
-                                            </label>
-
-                                            {/* Elimina foto */}
-                                            <button
-                                                type="button"
-                                                className="btn-remove-photo"
-                                                onClick={() => removePhoto(i)}
-                                            >
-                                                🗑
-                                            </button>
-                                        </div>
+                                        <button type="button" onClick={() => removePhoto(i)}>
+                                            🗑
+                                        </button>
                                     </div>
                                 );
                             })}
                         </div>
 
-
                         <div className="modal-actions">
-                            <button className="confirm" onClick={saveDamage}>Salva</button>
-                            <button className="cancel" onClick={() => setModalOpen(false)}>Chiudi</button>
+                            <button onClick={saveDamage}>Salva</button>
+                            <button onClick={() => setModalOpen(false)}>Chiudi</button>
                         </div>
                     </div>
                 </div>
@@ -347,4 +310,4 @@ const TechnicalReportsNew = () => {
     );
 };
 
-export default TechnicalReportsNew;
+export default InspectionReportsNew;

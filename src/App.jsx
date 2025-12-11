@@ -22,9 +22,11 @@ function App() {
                 <Route path="/" element={<Home />} />
                 <Route path="/technical-reports" element={<TechnicalReportList />} />
                 <Route path="/technical-reports/new" element={<TechnicalReportNew />} />
+                <Route path="/technical-reports/:id" element={<TechnicalReportNew />} />
 
                 <Route path="/inspection-reports" element={<InspectionReportList />} />
                 <Route path="/inspection-reports/new" element={<InspectionReportNew />} />
+
             </Routes>
 
             <Footer />
