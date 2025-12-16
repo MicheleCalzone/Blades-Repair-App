@@ -4,6 +4,7 @@ import { Editor } from "@tinymce/tinymce-react";
 import IconTrash from "../assets/IconTrash.jsx";
 import IconEdit from "../assets/IconEdit.jsx";
 import { useTechnicalReports } from "../hooks/useTechnicalReports";
+import { get } from "idb-keyval";
 
 const TechnicalReportsNew = () => {
     const { id } = useParams();
@@ -31,16 +32,44 @@ const TechnicalReportsNew = () => {
 
     const reportToEdit = id ? reports.find(r => r.id.toString() === id) : null;
 
+    // --- Carica dati report e foto da IndexedDB ---
     useEffect(() => {
-        if (id && reportToEdit) {
-            setTitle(reportToEdit.title || "");
-            setInfo(reportToEdit.info || emptyInfo);
-            setBlades(reportToEdit.blades || emptyBlades);
-        } else {
+        if (!id || !reportToEdit) {
             setTitle("");
             setInfo(emptyInfo);
             setBlades(emptyBlades);
+            return;
         }
+
+        const loadPhotos = async () => {
+            const bladesCopy = { ...reportToEdit.blades };
+
+            for (const blade of ["A", "B", "C"]) {
+                for (let i = 0; i < bladesCopy[blade].length; i++) {
+                    const item = bladesCopy[blade][i];
+
+                    console.log("Blade:", blade, "Item index:", i, "Photos array:", item.photos);
+
+                    if (item.photos && item.photos.length > 0) {
+                        const photosBase64 = await Promise.all(
+                            item.photos.map(async (photo) => {
+                                // Se è già base64 lo lasci, altrimenti prendi da IndexedDB
+                                if (photo.startsWith("data:")) return photo;
+                                const cached = await get(`photo_${photo}`);
+                                return cached || null;
+                            })
+                        );
+                        bladesCopy[blade][i].photos = photosBase64.filter(Boolean);
+                    }
+                }
+            }
+
+            setBlades(bladesCopy);
+        };
+
+        setTitle(reportToEdit.title || "");
+        setInfo(reportToEdit.info || emptyInfo);
+        loadPhotos();
     }, [id, reportToEdit]);
 
     const handleInfoChange = (e) => {
@@ -69,16 +98,27 @@ const TechnicalReportsNew = () => {
         setBlades(prev => ({ ...prev, [blade]: updated }));
     };
 
+    // --- Gestione Foto ---
     const handlePhotoUpload = (blade, index, files) => {
         const updated = [...blades[blade]];
-        updated[index].photos = [...updated[index].photos, ...files];
-        setBlades(prev => ({ ...prev, [blade]: updated }));
+
+        const readFiles = Array.from(files).map(file => {
+            return new Promise(resolve => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.readAsDataURL(file);
+            });
+        });
+
+        Promise.all(readFiles).then(results => {
+            updated[index].photos = [...updated[index].photos, ...results];
+            setBlades(prev => ({ ...prev, [blade]: updated }));
+        });
     };
 
     const handleDrop = (e, blade, index) => {
         e.preventDefault();
-        const files = Array.from(e.dataTransfer.files);
-        handlePhotoUpload(blade, index, files);
+        handlePhotoUpload(blade, index, e.dataTransfer.files);
     };
 
     const handleDragOver = (e) => e.preventDefault();
@@ -88,6 +128,17 @@ const TechnicalReportsNew = () => {
         updated[index].photos.splice(photoIndex, 1);
         setBlades(prev => ({ ...prev, [blade]: updated }));
     };
+
+    const editPhoto = (blade, index, photoIndex, file) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const updated = [...blades[blade]];
+            updated[index].photos[photoIndex] = reader.result;
+            setBlades(prev => ({ ...prev, [blade]: updated }));
+        };
+        reader.readAsDataURL(file);
+    };
+    // --- Fine gestione foto ---
 
     const handleSubmit = (e) => {
         e.preventDefault();
@@ -128,20 +179,14 @@ const TechnicalReportsNew = () => {
 
             <form className="report-form" onSubmit={handleSubmit}>
 
-                {/* --- Titolo --- */}
                 <fieldset>
                     <legend>Titolo Report</legend>
                     <div className="form-group">
                         <label>Titolo</label>
-                        <input
-                            type="text"
-                            value={title}
-                            onChange={handleTitleChange}
-                        />
+                        <input type="text" value={title} onChange={handleTitleChange} />
                     </div>
                 </fieldset>
 
-                {/* --- Info --- */}
                 <fieldset>
                     <legend>Informazioni Report</legend>
                     {Object.entries(info).map(([key, value]) => (
@@ -157,7 +202,6 @@ const TechnicalReportsNew = () => {
                     ))}
                 </fieldset>
 
-                {/* --- Blades --- */}
                 {["A", "B", "C"].map(blade => (
                     <fieldset key={blade}>
                         <legend>Blade {blade}</legend>
@@ -192,7 +236,6 @@ const TechnicalReportsNew = () => {
                                     />
                                 </div>
 
-                                {/* --- Editor --- */}
                                 <Editor
                                     value={item.description}
                                     init={{
@@ -212,59 +255,33 @@ const TechnicalReportsNew = () => {
                                     onEditorChange={(content) => handleBladeItemChange(blade, index, "description", content)}
                                 />
 
-                                {/* --- FOTO --- */}
+                                {/* --- BLOCCO FOTO --- */}
                                 <div className="form-group dropzone" onDrop={(e) => handleDrop(e, blade, index)} onDragOver={handleDragOver}>
                                     <label>Upload Foto</label>
-                                    <input
-                                        type="file"
-                                        multiple
-                                        onChange={(e) => handlePhotoUpload(blade, index, Array.from(e.target.files))}
-                                    />
+                                    <input type="file" multiple onChange={(e) => handlePhotoUpload(blade, index, Array.from(e.target.files))} />
 
                                     <div className="photo-preview">
-                                        {item.photos.map((file, i) => {
-                                            let src;
-                                            if (typeof file === "string") {
-                                                // URL remoto o locale
-                                                src = file;
-                                            } else {
-                                                // file locale appena caricato
-                                                src = URL.createObjectURL(file);
-                                            }
-
-                                            return (
-                                                <div className="photo-item" key={i}>
-                                                    <img src={src} className="photo-thumb" alt={`Foto ${i + 1}`} />
-
-                                                    <div className="photo-actions">
-                                                        {/* Matitina */}
-                                                        <label className="btn-edit">
-                                                            <IconEdit />
-                                                            <input
-                                                                type="file"
-                                                                accept="image/*"
-                                                                style={{ display: "none" }}
-                                                                onChange={(e) => {
-                                                                    const newFile = e.target.files[0];
-                                                                    if (!newFile) return;
-                                                                    const updated = [...blades[blade]];
-                                                                    updated[index].photos[i] = newFile;
-                                                                    setBlades(prev => ({ ...prev, [blade]: updated }));
-                                                                }}
-                                                            />
-                                                        </label>
-
-                                                        {/* Cestino */}
-                                                        <button type="button" className="btn-delete" onClick={() => removePhoto(blade, index, i)}>
-                                                            <IconTrash />
-                                                        </button>
-                                                    </div>
+                                        {item.photos.map((photo, i) => (
+                                            <div className="photo-item" key={i}>
+                                                <img src={photo} className="photo-thumb" alt={`Blade ${blade} foto ${i+1}`} />
+                                                <div className="photo-actions">
+                                                    <label className="btn-edit">
+                                                        <IconEdit />
+                                                        <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => {
+                                                            const newFile = e.target.files[0];
+                                                            if (!newFile) return;
+                                                            editPhoto(blade, index, i, newFile);
+                                                        }} />
+                                                    </label>
+                                                    <button type="button" className="btn-delete" onClick={() => removePhoto(blade, index, i)}>
+                                                        <IconTrash />
+                                                    </button>
                                                 </div>
-                                            )
-                                        })}
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
-                                {/* --- FINE FOTO --- */}
+                                {/* --- FINE BLOCCO FOTO --- */}
 
                             </div>
                         ))}

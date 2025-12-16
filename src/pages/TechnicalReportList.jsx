@@ -1,4 +1,3 @@
-// src/pages/TechnicalReportsList.jsx
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import IconReportAdd from "../assets/IconReportAdd";
@@ -15,7 +14,6 @@ const TechnicalReportsList = () => {
     const [monthFilteredReports, setMonthFilteredReports] = useState([]);
     const [searchFilteredReports, setSearchFilteredReports] = useState([]);
 
-    // Aggiorna i filtri quando cambiano i report
     useEffect(() => {
         setMonthFilteredReports(reports);
         setSearchFilteredReports(reports);
@@ -26,7 +24,6 @@ const TechnicalReportsList = () => {
 
         setMonthFilteredReports(
             reports.filter((r) => {
-                // preferisci la data online se disponibile
                 const dateStr = r.modified || r.info?.reportDate || r.date;
                 if (!dateStr) return false;
                 const month = new Date(dateStr).getMonth() + 1;
@@ -38,13 +35,12 @@ const TechnicalReportsList = () => {
     const handleSearch = () => {
         setSearchFilteredReports(
             reports.filter((r) => {
-                const title = r.title?.rendered || r.info?.customer || "";
+                const title = r.title || r.info?.customer || "";
                 return title.toLowerCase().includes(searchTerm.toLowerCase());
             })
         );
     };
 
-    // Intersezione dei due filtri
     const displayedReports = monthFilteredReports.filter((r) =>
         searchFilteredReports.some((sr) => sr.id === r.id)
     );
@@ -105,7 +101,7 @@ const TechnicalReportsList = () => {
                 </thead>
                 <tbody>
                 {displayedReports.map((r) => {
-                    const title = r.title?.rendered || r.info?.customer || "Untitled";
+                    const title = r.title || r.info?.customer || "Untitled"; // <--- CORRETTO
                     const date = r.modified || r.info?.reportDate || "-";
 
                     return (

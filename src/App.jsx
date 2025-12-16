@@ -1,5 +1,7 @@
 import React from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { useSync } from "./hooks/useSync";
+
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 
@@ -14,6 +16,8 @@ import InspectionReportNew from "./pages/InspectionReportNew.jsx";
 
 
 function App() {
+    useSync();
+
     return (
         <Router>
             <Navbar />
