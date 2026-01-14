@@ -4,6 +4,7 @@ import { get, set } from "idb-keyval";
 const API_REPORT_TECNICI =
     "https://mirodesign.it/off-line/blades-repair/wp-json/wp/v2/report-tecnici?per_page=10";
 
+// Formatta le date dal formato DD.MM.YY a YYYY-MM-DD
 const formatDateForInput = (dateStr) => {
     if (!dateStr) return "";
     const parts = dateStr.split(".");
@@ -12,31 +13,25 @@ const formatDateForInput = (dateStr) => {
     return `${year}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
 };
 
-// --- Fetch immagini solo da IndexedDB, in produzione scarica se serve ---
+// --- Fetch immagini tramite endpoint WordPress /blades/v1/image ---
 const fetchAndStoreImage = async (photoObj) => {
     try {
-        // photoObj = { id, source_url }
+        if (!photoObj || !photoObj.id) return null;
+
+        // Controlla IndexedDB prima
         const cached = await get(`photo_${photoObj.id}`);
         if (cached) return cached;
 
-        // Solo in produzione scarica dal server
-        if (!import.meta.env.DEV && photoObj.source_url) {
-            const res = await fetch(photoObj.source_url);
-            if (!res.ok) throw new Error("Errore fetch immagine");
-            const blob = await res.blob();
+        // Altrimenti fetch tramite endpoint WordPress
+        const url = `https://mirodesign.it/off-line/blades-repair/wp-json/blades/v1/image?id=${photoObj.id}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("Errore fetch immagine");
 
-            const reader = new FileReader();
-            const dataUrl = await new Promise((resolve) => {
-                reader.onloadend = () => resolve(reader.result);
-                reader.readAsDataURL(blob);
-            });
+        const data = await res.json();
+        if (!data.url) return null;
 
-            await set(`photo_${photoObj.id}`, dataUrl);
-            return dataUrl;
-        }
-
-        // In sviluppo ritorna null (evita CORS)
-        return null;
+        await set(`photo_${photoObj.id}`, data.url);
+        return data.url;
     } catch (err) {
         console.error("Errore caricamento foto", err);
         return null;
@@ -51,11 +46,9 @@ export const useTechnicalReports = () => {
     const loadReports = async () => {
         setLoading(true);
         try {
-            // Carica dati offline se presenti
             const offlineData = localStorage.getItem("technicalReports");
             if (offlineData) setReports(JSON.parse(offlineData));
 
-            // Fetch report da server
             const res = await fetch(API_REPORT_TECNICI);
             if (!res.ok) throw new Error("Errore recupero report tecnici");
             const data = await res.json();
@@ -66,19 +59,17 @@ export const useTechnicalReports = () => {
 
                     const parseBladeItems = async (items, bladeLetter) => {
                         if (!items || !Array.isArray(items)) return [];
-
                         return Promise.all(
                             items.map(async (item) => {
-                                const photos = await Promise.all(
-                                    (item[`photo_${bladeLetter.toLowerCase()}`] || []).map(fetchAndStoreImage)
-                                );
-
+                                const photoObjs =
+                                    (item[`photo_${bladeLetter.toLowerCase()}`] || []).map((p) => ({ id: p.id }));
+                                const photos = await Promise.all(photoObjs.map(fetchAndStoreImage));
                                 return {
                                     radius: item.radius || "",
                                     position: item.position || "",
                                     task: item.completed_task || "",
                                     description: item[`editor_${bladeLetter.toLowerCase()}`] || "",
-                                    photos: photos.filter(Boolean), // rimuove eventuali null
+                                    photos: photos.filter(Boolean),
                                 };
                             })
                         );

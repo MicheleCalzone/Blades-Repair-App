@@ -30,9 +30,8 @@ const TechnicalReportsNew = () => {
     const [info, setInfo] = useState(emptyInfo);
     const [blades, setBlades] = useState(emptyBlades);
 
-    const reportToEdit = id ? reports.find(r => r.id.toString() === id) : null;
+    const reportToEdit = id ? reports.find((r) => r.id.toString() === id) : null;
 
-    // --- Carica dati report e foto da IndexedDB ---
     useEffect(() => {
         if (!id || !reportToEdit) {
             setTitle("");
@@ -47,15 +46,11 @@ const TechnicalReportsNew = () => {
             for (const blade of ["A", "B", "C"]) {
                 for (let i = 0; i < bladesCopy[blade].length; i++) {
                     const item = bladesCopy[blade][i];
-
-                    console.log("Blade:", blade, "Item index:", i, "Photos array:", item.photos);
-
                     if (item.photos && item.photos.length > 0) {
                         const photosBase64 = await Promise.all(
                             item.photos.map(async (photo) => {
-                                // Se è già base64 lo lasci, altrimenti prendi da IndexedDB
-                                if (photo.startsWith("data:")) return photo;
-                                const cached = await get(`photo_${photo}`);
+                                if (typeof photo === "string" && photo.startsWith("http")) return photo;
+                                const cached = await get(`photo_${photo.id || photo}`);
                                 return cached || null;
                             })
                         );
@@ -74,45 +69,45 @@ const TechnicalReportsNew = () => {
 
     const handleInfoChange = (e) => {
         const { name, value } = e.target;
-        setInfo(prev => ({ ...prev, [name]: value }));
+        setInfo((prev) => ({ ...prev, [name]: value }));
     };
 
     const handleTitleChange = (e) => setTitle(e.target.value);
 
     const addBladeItem = (blade) => {
-        setBlades(prev => ({
+        setBlades((prev) => ({
             ...prev,
-            [blade]: [...prev[blade], { radius: "", position: "", task: "", description: "", photos: [] }]
+            [blade]: [...prev[blade], { radius: "", position: "", task: "", description: "", photos: [] }],
         }));
     };
 
     const removeBladeItem = (blade, index) => {
         const updated = [...blades[blade]];
         updated.splice(index, 1);
-        setBlades(prev => ({ ...prev, [blade]: updated }));
+        setBlades((prev) => ({ ...prev, [blade]: updated }));
     };
 
     const handleBladeItemChange = (blade, index, field, value) => {
         const updated = [...blades[blade]];
         updated[index][field] = value;
-        setBlades(prev => ({ ...prev, [blade]: updated }));
+        setBlades((prev) => ({ ...prev, [blade]: updated }));
     };
 
-    // --- Gestione Foto ---
+    // --- Foto ---
     const handlePhotoUpload = (blade, index, files) => {
         const updated = [...blades[blade]];
 
-        const readFiles = Array.from(files).map(file => {
-            return new Promise(resolve => {
+        const readFiles = Array.from(files).map((file) => {
+            return new Promise((resolve) => {
                 const reader = new FileReader();
                 reader.onloadend = () => resolve(reader.result);
                 reader.readAsDataURL(file);
             });
         });
 
-        Promise.all(readFiles).then(results => {
+        Promise.all(readFiles).then((results) => {
             updated[index].photos = [...updated[index].photos, ...results];
-            setBlades(prev => ({ ...prev, [blade]: updated }));
+            setBlades((prev) => ({ ...prev, [blade]: updated }));
         });
     };
 
@@ -126,7 +121,7 @@ const TechnicalReportsNew = () => {
     const removePhoto = (blade, index, photoIndex) => {
         const updated = [...blades[blade]];
         updated[index].photos.splice(photoIndex, 1);
-        setBlades(prev => ({ ...prev, [blade]: updated }));
+        setBlades((prev) => ({ ...prev, [blade]: updated }));
     };
 
     const editPhoto = (blade, index, photoIndex, file) => {
@@ -134,15 +129,14 @@ const TechnicalReportsNew = () => {
         reader.onloadend = () => {
             const updated = [...blades[blade]];
             updated[index].photos[photoIndex] = reader.result;
-            setBlades(prev => ({ ...prev, [blade]: updated }));
+            setBlades((prev) => ({ ...prev, [blade]: updated }));
         };
         reader.readAsDataURL(file);
     };
-    // --- Fine gestione foto ---
+    // --- Fine foto ---
 
     const handleSubmit = (e) => {
         e.preventDefault();
-
         const newReport = {
             id: reportToEdit?.id || Date.now(),
             title,
@@ -153,11 +147,11 @@ const TechnicalReportsNew = () => {
         };
 
         if (reportToEdit) {
-            setReports(prev => prev.map(r => r.id === reportToEdit.id ? newReport : r));
+            setReports((prev) => prev.map((r) => (r.id === reportToEdit.id ? newReport : r)));
             saveReportOffline(newReport);
             alert("Report aggiornato offline!");
         } else {
-            setReports(prev => [...prev, newReport]);
+            setReports((prev) => [...prev, newReport]);
             saveReportOffline(newReport);
             alert("Report creato offline!");
         }
@@ -165,18 +159,11 @@ const TechnicalReportsNew = () => {
         navigate("/technical-reports");
     };
 
-    if (!info || !blades) {
-        return (
-            <div className="page-container page-technical-report-new">
-                <h2>Caricamento dati...</h2>
-            </div>
-        );
-    }
+    if (!info || !blades) return <div className="page-container page-technical-report-new"><h2>Caricamento dati...</h2></div>;
 
     return (
         <div className="page-container page-technical-report-new">
             <h1>{reportToEdit ? "Modifica Report Tecnico" : "Creazione Report Tecnico"}</h1>
-
             <form className="report-form" onSubmit={handleSubmit}>
 
                 <fieldset>
@@ -202,13 +189,12 @@ const TechnicalReportsNew = () => {
                     ))}
                 </fieldset>
 
-                {["A", "B", "C"].map(blade => (
+                {["A", "B", "C"].map((blade) => (
                     <fieldset key={blade}>
                         <legend>Blade {blade}</legend>
                         {blades[blade].map((item, index) => (
                             <div className="blade-item" key={index}>
                                 <h4>Item {index + 1}</h4>
-
                                 <div className="form-group">
                                     <label>Radius</label>
                                     <input
@@ -217,7 +203,6 @@ const TechnicalReportsNew = () => {
                                         onChange={(e) => handleBladeItemChange(blade, index, "radius", e.target.value)}
                                     />
                                 </div>
-
                                 <div className="form-group">
                                     <label>Position</label>
                                     <input
@@ -226,7 +211,6 @@ const TechnicalReportsNew = () => {
                                         onChange={(e) => handleBladeItemChange(blade, index, "position", e.target.value)}
                                     />
                                 </div>
-
                                 <div className="form-group">
                                     <label>Completed Task</label>
                                     <input
@@ -255,7 +239,7 @@ const TechnicalReportsNew = () => {
                                     onEditorChange={(content) => handleBladeItemChange(blade, index, "description", content)}
                                 />
 
-                                {/* --- BLOCCO FOTO --- */}
+                                {/* BLOCCO FOTO */}
                                 <div className="form-group dropzone" onDrop={(e) => handleDrop(e, blade, index)} onDragOver={handleDragOver}>
                                     <label>Upload Foto</label>
                                     <input type="file" multiple onChange={(e) => handlePhotoUpload(blade, index, Array.from(e.target.files))} />
@@ -263,7 +247,7 @@ const TechnicalReportsNew = () => {
                                     <div className="photo-preview">
                                         {item.photos.map((photo, i) => (
                                             <div className="photo-item" key={i}>
-                                                <img src={photo} className="photo-thumb" alt={`Blade ${blade} foto ${i+1}`} />
+                                                <img src={photo} className="photo-thumb" alt={`Blade ${blade} foto ${i + 1}`} />
                                                 <div className="photo-actions">
                                                     <label className="btn-edit">
                                                         <IconEdit />
@@ -281,11 +265,10 @@ const TechnicalReportsNew = () => {
                                         ))}
                                     </div>
                                 </div>
-                                {/* --- FINE BLOCCO FOTO --- */}
+                                {/* FINE BLOCCO FOTO */}
 
                             </div>
                         ))}
-
                         <button type="button" className="btn btn-add-item" onClick={() => addBladeItem(blade)}>Aggiungi Item</button>
                     </fieldset>
                 ))}
