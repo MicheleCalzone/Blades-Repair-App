@@ -1,3 +1,5 @@
+// javascript
+// src/hooks/useTechnicalReports.js
 import { useState, useEffect } from "react";
 import { get, set } from "idb-keyval";
 
@@ -14,23 +16,34 @@ const formatDateForInput = (dateStr) => {
 };
 
 // --- Fetch immagini tramite endpoint WordPress /blades/v1/image ---
-const fetchAndStoreImage = async (photoObj) => {
+// Ora accetta sia un oggetto foto che un id (number|string) e normalizza l'id.
+const fetchAndStoreImage = async (photoInput) => {
     try {
-        if (!photoObj || !photoObj.id) return null;
+        if (photoInput === null || photoInput === undefined) return null;
+
+        // Normalizza l'id: può essere un numero, una stringa o un oggetto { id } / { ID } / { mediaId }
+        const id =
+            typeof photoInput === "object"
+                ? photoInput.id ?? photoInput.ID ?? photoInput.mediaId ?? null
+                : photoInput;
+
+        if (!id && id !== 0) return null;
+
+        const key = `photo_${id}`;
 
         // Controlla IndexedDB prima
-        const cached = await get(`photo_${photoObj.id}`);
+        const cached = await get(key);
         if (cached) return cached;
 
         // Altrimenti fetch tramite endpoint WordPress
-        const url = `https://mirodesign.it/off-line/blades-repair/wp-json/blades/v1/image?id=${photoObj.id}`;
+        const url = `https://mirodesign.it/off-line/blades-repair/wp-json/blades/v1/image?id=${id}`;
         const res = await fetch(url);
         if (!res.ok) throw new Error("Errore fetch immagine");
 
         const data = await res.json();
-        if (!data.url) return null;
+        if (!data || !data.url) return null;
 
-        await set(`photo_${photoObj.id}`, data.url);
+        await set(key, data.url);
         return data.url;
     } catch (err) {
         console.error("Errore caricamento foto", err);
@@ -61,9 +74,31 @@ export const useTechnicalReports = () => {
                         if (!items || !Array.isArray(items)) return [];
                         return Promise.all(
                             items.map(async (item) => {
-                                const photoObjs =
-                                    (item[`photo_${bladeLetter.toLowerCase()}`] || []).map((p) => ({ id: p.id }));
-                                const photos = await Promise.all(photoObjs.map(fetchAndStoreImage));
+                                // Prendi le foto raw (possono essere url, id numerici, stringhe numeriche o oggetti)
+                                const rawPhotos = item[`photo_${bladeLetter.toLowerCase()}`] || [];
+
+                                // Normalizza: mantieni URL/data:, estrai id da oggetti, lascia numeri/stringhe numeriche
+                                const normalized = rawPhotos
+                                    .map((p) => {
+                                        if (!p && p !== 0) return null;
+                                        if (typeof p === "string") return p;
+                                        if (typeof p === "object") return p.id ?? p.ID ?? p.mediaId ?? null;
+                                        return p;
+                                    })
+                                    .filter(Boolean);
+
+                                // Per ogni voce: se è già un URL (http o data:) lo uso; altrimenti provo a fetchare tramite id
+                                const photos = await Promise.all(
+                                    normalized.map(async (np) => {
+                                        if (typeof np === "string" && (np.startsWith("http") || np.startsWith("data:"))) {
+                                            return np;
+                                        }
+                                        // se è stringa numerica, converto in number
+                                        const id = typeof np === "string" && /^\d+$/.test(np) ? Number(np) : np;
+                                        return await fetchAndStoreImage(id);
+                                    })
+                                );
+
                                 return {
                                     radius: item.radius || "",
                                     position: item.position || "",
