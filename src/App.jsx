@@ -18,6 +18,8 @@ import InspectionReportNew from "./pages/InspectionReportNew.jsx";
 function App() {
     useSync();
 
+    console.log('App: mounted');
+
     return (
         <Router>
             <Navbar />
@@ -30,6 +32,7 @@ function App() {
 
                 <Route path="/inspection-reports" element={<InspectionReportList />} />
                 <Route path="/inspection-reports/new" element={<InspectionReportNew />} />
+                <Route path="/inspection-reports/:id" element={<InspectionReportNew />} />
 
             </Routes>
 

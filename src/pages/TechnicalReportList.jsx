@@ -1,9 +1,18 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import IconReportAdd from "../assets/IconReportAdd";
 import IconTrash from "../assets/IconTrash";
 import IconEdit from "../assets/IconEdit";
 import { useTechnicalReports } from "../hooks/useTechnicalReports";
+
+const getTechnicalReportDate = (report) => {
+    const value = report?.lastModified || report?.modified || report?.info?.reportDate || report?.date || "";
+    const time = value ? new Date(value).getTime() : NaN;
+    return Number.isNaN(time) ? 0 : time;
+};
+
+const getTechnicalReportDateValue = (report) =>
+    report?.lastModified || report?.modified || report?.info?.reportDate || report?.date || "";
 
 const TechnicalReportsList = () => {
     const navigate = useNavigate();
@@ -13,18 +22,23 @@ const TechnicalReportsList = () => {
     const [searchTerm, setSearchTerm] = useState("");
     const [monthFilteredReports, setMonthFilteredReports] = useState([]);
     const [searchFilteredReports, setSearchFilteredReports] = useState([]);
+    const sortedReports = useMemo(() => [...reports].sort((a, b) => {
+        const diff = getTechnicalReportDate(b) - getTechnicalReportDate(a);
+        if (diff !== 0) return diff;
+        return (a.title || a.info?.customer || "").localeCompare(b.title || b.info?.customer || "");
+    }), [reports]);
 
     useEffect(() => {
-        setMonthFilteredReports(reports);
-        setSearchFilteredReports(reports);
-    }, [reports]);
+        setMonthFilteredReports(sortedReports);
+        setSearchFilteredReports(sortedReports);
+    }, [sortedReports]);
 
     const handleMonthFilter = () => {
-        if (!filterMonth) return setMonthFilteredReports(reports);
+        if (!filterMonth) return setMonthFilteredReports(sortedReports);
 
         setMonthFilteredReports(
-            reports.filter((r) => {
-                const dateStr = r.modified || r.info?.reportDate || r.date;
+            sortedReports.filter((r) => {
+                const dateStr = getTechnicalReportDateValue(r);
                 if (!dateStr) return false;
                 const month = new Date(dateStr).getMonth() + 1;
                 return month.toString() === filterMonth;
@@ -34,7 +48,7 @@ const TechnicalReportsList = () => {
 
     const handleSearch = () => {
         setSearchFilteredReports(
-            reports.filter((r) => {
+            sortedReports.filter((r) => {
                 const title = r.title || r.info?.customer || "";
                 return title.toLowerCase().includes(searchTerm.toLowerCase());
             })
@@ -102,7 +116,7 @@ const TechnicalReportsList = () => {
                 <tbody>
                 {displayedReports.map((r) => {
                     const title = r.title || r.info?.customer || "Untitled"; // <--- CORRETTO
-                    const date = r.modified || r.info?.reportDate || "-";
+                    const date = getTechnicalReportDateValue(r) || "-";
 
                     return (
                         <tr key={r.id}>

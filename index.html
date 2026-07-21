@@ -4,12 +4,34 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Blades repair App</title>
+    <title>Blades Repair App</title>
 
     <script src="/tinymce/js/tinymce/tinymce.min.js"></script>
 
+    <style>
+      #app-status {
+        position: fixed;
+        right: 12px;
+        bottom: 12px;
+        background: rgba(0,0,0,0.7);
+        color: #fff;
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        z-index: 99999;
+      }
+    </style>
   </head>
   <body>
+    <div id="app-status">JS not executed</div>
+    <script>
+      console.log('index.html: loaded');
+      try {
+        document.getElementById('app-status').innerText = 'index.html script executed';
+      } catch(e) {
+        // ignore
+      }
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

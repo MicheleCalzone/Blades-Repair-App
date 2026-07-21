@@ -1,9 +1,20 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import IconReportAdd from "../assets/IconReportAdd";
 import IconTrash from "../assets/IconTrash";
 import IconEdit from "../assets/IconEdit";
 import useInspectionReports from "../hooks/useInspectionReports";
+
+const getInspectionReportDate = (report) => {
+    const value = report?.lastModified || report?.modified || report?.info?.date || report?.date || "";
+    const time = value ? new Date(value).getTime() : NaN;
+    return Number.isNaN(time) ? 0 : time;
+};
+
+const getInspectionReportTitle = (report) => {
+    if (typeof report?.title === "string") return report.title;
+    return report?.title?.rendered || report?.nome?.rendered || "Untitled";
+};
 
 const InspectionReportsList = () => {
     const navigate = useNavigate();
@@ -13,16 +24,21 @@ const InspectionReportsList = () => {
     const [searchTerm, setSearchTerm] = useState("");
     const [monthFilteredReports, setMonthFilteredReports] = useState([]);
     const [searchFilteredReports, setSearchFilteredReports] = useState([]);
+    const sortedReports = useMemo(() => [...reports].sort((a, b) => {
+        const diff = getInspectionReportDate(b) - getInspectionReportDate(a);
+        if (diff !== 0) return diff;
+        return getInspectionReportTitle(a).localeCompare(getInspectionReportTitle(b));
+    }), [reports]);
 
     useEffect(() => {
-        setMonthFilteredReports(reports);
-        setSearchFilteredReports(reports);
-    }, [reports]);
+        setMonthFilteredReports(sortedReports);
+        setSearchFilteredReports(sortedReports);
+    }, [sortedReports]);
 
     const handleMonthFilter = () => {
-        if (!filterMonth) return setMonthFilteredReports(reports);
+        if (!filterMonth) return setMonthFilteredReports(sortedReports);
         setMonthFilteredReports(
-            reports.filter((r) => {
+            sortedReports.filter((r) => {
                 const month = r.date ? new Date(r.date).getMonth() + 1 : null;
                 return month?.toString() === filterMonth;
             })
@@ -31,7 +47,7 @@ const InspectionReportsList = () => {
 
     const handleSearch = () => {
         setSearchFilteredReports(
-            reports.filter((r) => (r.title?.rendered || "").toLowerCase().includes(searchTerm.toLowerCase()))
+            sortedReports.filter((r) => getInspectionReportTitle(r).toLowerCase().includes(searchTerm.toLowerCase()))
         );
     };
 
@@ -83,16 +99,16 @@ const InspectionReportsList = () => {
                 <tbody>
                 {displayedReports.map((r) => (
                     <tr key={r.id}>
-                        <td className="report-title" onClick={() => navigate(`/inspection-reports/${r.id}`)}>
-                            {r.title?.rendered || r.nome?.rendered || "Untitled"}
+                        <td className="report-title" onClick={() => { console.log('navigating to report', r.id); navigate(`/inspection-reports/${r.id}`); }}>
+                            {getInspectionReportTitle(r)}
                         </td>
                         <td>{r.date || "-"}</td>
                         <td>{r.synced ? "Online" : "Offline"}</td>
                         <td className="td-action">
-                            <button className="action-btn" onClick={() => navigate(`/inspection-reports/${r.id}`)}>
+                            <button className="action-btn" onClick={() => { console.log('navigating to report (edit)', r.id); navigate(`/inspection-reports/${r.id}`); }}>
                                 <IconEdit className="icon" />
                             </button>
-                            <button className="action-btn" onClick={() => deleteReport(r.id)}>
+                            <button className="action-btn" onClick={() => { console.log('deleting report', r.id); deleteReport(r.id); }}>
                                 <IconTrash className="icon" />
                             </button>
                         </td>

@@ -9,7 +9,7 @@ import { get } from "idb-keyval";
 const TechnicalReportsNew = () => {
     const { id } = useParams();
     const navigate = useNavigate();
-    const { reports, saveReportOffline, setReports } = useTechnicalReports();
+    const { reports, saveReportOffline } = useTechnicalReports();
 
     const emptyInfo = {
         customer: "",
@@ -49,7 +49,9 @@ const TechnicalReportsNew = () => {
                     if (item.photos && item.photos.length > 0) {
                         const photosBase64 = await Promise.all(
                             item.photos.map(async (photo) => {
-                                if (typeof photo === "string" && photo.startsWith("http")) return photo;
+                                if (typeof photo === "string" && (photo.startsWith("http") || photo.startsWith("data:"))) {
+                                    return photo;
+                                }
                                 const cached = await get(`photo_${photo.id || photo}`);
                                 return cached || null;
                             })
@@ -62,7 +64,7 @@ const TechnicalReportsNew = () => {
             setBlades(bladesCopy);
         };
 
-        setTitle(reportToEdit.title || "");
+        setTitle(reportToEdit.title || reportToEdit.info?.name || "");
         setInfo(reportToEdit.info || emptyInfo);
         loadPhotos();
     }, [id, reportToEdit]);
@@ -135,26 +137,24 @@ const TechnicalReportsNew = () => {
     };
     // --- Fine foto ---
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
+        const normalizedTitle = (title || info.name || "").trim();
+        const finalTitle = normalizedTitle || `Report Tecnico ${new Date().toLocaleDateString("it-IT")}`;
         const newReport = {
             id: reportToEdit?.id || Date.now(),
-            title,
-            info,
+            title: finalTitle,
+            info: {
+                ...info,
+                name: normalizedTitle,
+            },
             blades,
             synced: false,
             lastModified: new Date().toISOString(),
         };
 
-        if (reportToEdit) {
-            setReports((prev) => prev.map((r) => (r.id === reportToEdit.id ? newReport : r)));
-            saveReportOffline(newReport);
-            alert("Report aggiornato offline!");
-        } else {
-            setReports((prev) => [...prev, newReport]);
-            saveReportOffline(newReport);
-            alert("Report creato offline!");
-        }
+        await saveReportOffline(newReport);
+        alert(reportToEdit ? "Report aggiornato offline!" : "Report creato offline!");
 
         navigate("/technical-reports");
     };
@@ -176,7 +176,7 @@ const TechnicalReportsNew = () => {
 
                 <fieldset>
                     <legend>Informazioni Report</legend>
-                    {Object.entries(info).map(([key, value]) => (
+                    {Object.entries(info).filter(([key]) => key !== "name").map(([key, value]) => (
                         <div className="form-group" key={key}>
                             <label>{key.replace(/([A-Z])/g, " $1")}</label>
                             <input

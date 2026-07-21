@@ -2,6 +2,7 @@
 // src/hooks/useTechnicalReports.js
 import { useState, useEffect } from "react";
 import { get, set } from "idb-keyval";
+import { addToSyncQueue, syncNow } from "../services/syncService";
 
 const API_REPORT_TECNICI =
     "https://mirodesign.it/off-line/blades-repair/wp-json/wp/v2/report-tecnici?per_page=10";
@@ -13,6 +14,91 @@ const formatDateForInput = (dateStr) => {
     if (parts.length !== 3) return "";
     const year = `20${parts[2]}`;
     return `${year}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+};
+
+const emptyInfo = {
+    name: "",
+    customer: "",
+    windfarm: "",
+    wtgId: "",
+    wtgType: "",
+    hubHeight: "",
+    repairBy: "Blades Repair Srl",
+    technician: "",
+    startDate: "",
+    endDate: "",
+    reportDate: "",
+};
+
+const emptyBlades = { A: [], B: [], C: [] };
+
+const normalizeTechnicalReport = (report = {}) => {
+    const id = report.id ?? report.ID ?? report.reportId ?? Date.now();
+    const rawTitle = report.title?.rendered || report.title || report.info?.name || "";
+
+    return {
+        ...report,
+        id,
+        title: rawTitle,
+        info: {
+            ...emptyInfo,
+            ...(report.info || {}),
+        },
+        blades: {
+            A: Array.isArray(report.blades?.A) ? report.blades.A : [],
+            B: Array.isArray(report.blades?.B) ? report.blades.B : [],
+            C: Array.isArray(report.blades?.C) ? report.blades.C : [],
+        },
+        synced: report.synced ?? false,
+        lastModified: report.lastModified || report.modified || new Date().toISOString(),
+    };
+};
+
+const buildSyncPayload = (report) => {
+    const normalized = normalizeTechnicalReport(report);
+
+    return {
+        type: "technical-report",
+        reportId: normalized.id,
+        localId: normalized.id,
+        lastModified: normalized.lastModified,
+        data: normalized,
+    };
+};
+
+const mergeTechnicalReports = (serverReports = [], localReports = []) => {
+    const serverArr = Array.isArray(serverReports) ? serverReports.map(normalizeTechnicalReport) : [];
+    const localArr = Array.isArray(localReports) ? localReports.map(normalizeTechnicalReport) : [];
+
+    const merged = serverArr.map((serverReport) => {
+        const localReport = localArr.find((item) => String(item.id) === String(serverReport.id));
+        if (!localReport) return serverReport;
+
+        const mergedTitle = (localReport.title || "").trim() || (serverReport.title || "").trim() || "Untitled";
+
+        return {
+            ...serverReport,
+            ...localReport,
+            title: mergedTitle,
+            info: {
+                ...serverReport.info,
+                ...localReport.info,
+            },
+            blades: {
+                A: localReport.blades?.A?.length ? localReport.blades.A : serverReport.blades?.A || [],
+                B: localReport.blades?.B?.length ? localReport.blades.B : serverReport.blades?.B || [],
+                C: localReport.blades?.C?.length ? localReport.blades.C : serverReport.blades?.C || [],
+            },
+        };
+    });
+
+    localArr.forEach((localReport) => {
+        if (!serverArr.some((serverReport) => String(serverReport.id) === String(localReport.id))) {
+            merged.push(localReport);
+        }
+    });
+
+    return merged;
 };
 
 // --- Fetch immagini tramite endpoint WordPress /blades/v1/image ---
@@ -60,7 +146,8 @@ export const useTechnicalReports = () => {
         setLoading(true);
         try {
             const offlineData = localStorage.getItem("technicalReports");
-            if (offlineData) setReports(JSON.parse(offlineData));
+            const localReports = offlineData ? JSON.parse(offlineData) : [];
+            setReports(Array.isArray(localReports) ? localReports.map(normalizeTechnicalReport) : []);
 
             const res = await fetch(API_REPORT_TECNICI);
             if (!res.ok) throw new Error("Errore recupero report tecnici");
@@ -112,8 +199,9 @@ export const useTechnicalReports = () => {
 
                     return {
                         id: r.id,
-                        title: r.title?.rendered || "",
+                        title: r.title?.rendered || meta.name || "",
                         info: {
+                            name: meta.name || r.title?.rendered || "",
                             customer: meta.customer || "",
                             windfarm: meta.windfarm || "",
                             wtgId: meta["wtg-id-nr"] || "",
@@ -136,8 +224,9 @@ export const useTechnicalReports = () => {
                 })
             );
 
-            setReports(prepared);
-            localStorage.setItem("technicalReports", JSON.stringify(prepared));
+            const merged = mergeTechnicalReports(prepared, localReports);
+            setReports(merged);
+            localStorage.setItem("technicalReports", JSON.stringify(merged));
         } catch (err) {
             setError(err.message);
         } finally {
@@ -145,18 +234,34 @@ export const useTechnicalReports = () => {
         }
     };
 
-    const saveReportOffline = (report) => {
-        const updated = [...reports];
-        const idx = updated.findIndex((r) => r.id === report.id);
-        if (idx >= 0) updated[idx] = report;
-        else updated.push(report);
-        setReports(updated);
-        localStorage.setItem("technicalReports", JSON.stringify(updated));
+    const saveReportOffline = async (report) => {
+        const normalized = normalizeTechnicalReport(report);
+        setReports((prev) => {
+            const updated = [...prev];
+            const idx = updated.findIndex((r) => String(r.id) === String(normalized.id));
+            if (idx >= 0) updated[idx] = normalized;
+            else updated.push(normalized);
+            localStorage.setItem("technicalReports", JSON.stringify(updated));
+            return updated;
+        });
+
+        await addToSyncQueue(buildSyncPayload(normalized));
+        if (navigator.onLine) {
+            await syncNow();
+        }
+    };
+
+    const deleteReport = (id) => {
+        setReports((prev) => {
+            const updated = prev.filter((r) => String(r.id) !== String(id));
+            localStorage.setItem("technicalReports", JSON.stringify(updated));
+            return updated;
+        });
     };
 
     useEffect(() => {
         loadReports();
     }, []);
 
-    return { reports, setReports, loading, error, saveReportOffline };
+    return { reports, setReports, loading, error, saveReportOffline, deleteReport };
 };
