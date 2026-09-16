@@ -102,7 +102,7 @@ const InspectionReportsList = () => {
                         <td className="report-title" onClick={() => { console.log('navigating to report', r.id); navigate(`/inspection-reports/${r.id}`); }}>
                             {getInspectionReportTitle(r)}
                         </td>
-                        <td>{r.date || "-"}</td>
+                        <td>{r.lastModified || r.modified || r.date || "-"}</td>
                         <td>{r.synced ? "Online" : "Offline"}</td>
                         <td className="td-action">
                             <button className="action-btn" onClick={() => { console.log('navigating to report (edit)', r.id); navigate(`/inspection-reports/${r.id}`); }}>

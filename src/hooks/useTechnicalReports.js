@@ -7,13 +7,34 @@ import { addToSyncQueue, syncNow } from "../services/syncService";
 const API_REPORT_TECNICI =
     "https://mirodesign.it/off-line/blades-repair/wp-json/wp/v2/report-tecnici?per_page=10";
 
-// Formatta le date dal formato DD.MM.YY a YYYY-MM-DD
+// Formatta le date in un formato riconosciuto dall'input type="date"
 const formatDateForInput = (dateStr) => {
-    if (!dateStr) return "";
-    const parts = dateStr.split(".");
-    if (parts.length !== 3) return "";
-    const year = `20${parts[2]}`;
-    return `${year}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+    if (!dateStr && dateStr !== 0) return "";
+
+    const value = String(dateStr).trim();
+    if (!value) return "";
+
+    const isoMatch = value.match(/^\d{4}-\d{2}-\d{2}/);
+    if (isoMatch) return isoMatch[0];
+
+    const slashMatch = value.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    if (slashMatch) {
+        const [, d, m, y] = slashMatch;
+        const year = y.length === 2 ? `20${y}` : y;
+        return `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    }
+
+    const dotMatch = value.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})/);
+    if (dotMatch) {
+        const [, d, m, y] = dotMatch;
+        const year = y.length === 2 ? `20${y}` : y;
+        return `${year}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    }
+
+    const timeMatch = value.match(/^\d{4}-\d{2}-\d{2}T/);
+    if (timeMatch) return value.split("T")[0];
+
+    return "";
 };
 
 const emptyInfo = {
@@ -32,6 +53,13 @@ const emptyInfo = {
 
 const emptyBlades = { A: [], B: [], C: [] };
 
+const normalizeBladeArray = (value) => {
+    if (Array.isArray(value)) return value;
+    if (!value) return [];
+    if (typeof value === "object") return [value];
+    return [];
+};
+
 const normalizeTechnicalReport = (report = {}) => {
     const id = report.id ?? report.ID ?? report.reportId ?? Date.now();
     const rawTitle = report.title?.rendered || report.title || report.info?.name || "";
@@ -45,25 +73,126 @@ const normalizeTechnicalReport = (report = {}) => {
             ...(report.info || {}),
         },
         blades: {
-            A: Array.isArray(report.blades?.A) ? report.blades.A : [],
-            B: Array.isArray(report.blades?.B) ? report.blades.B : [],
-            C: Array.isArray(report.blades?.C) ? report.blades.C : [],
+            A: normalizeBladeArray(report.blades?.A),
+            B: normalizeBladeArray(report.blades?.B),
+            C: normalizeBladeArray(report.blades?.C),
         },
         synced: report.synced ?? false,
         lastModified: report.lastModified || report.modified || new Date().toISOString(),
     };
 };
 
-const buildSyncPayload = (report) => {
+const API_MEDIA_UPLOAD = "https://mirodesign.it/off-line/blades-repair/wp-json/wp/v2/media";
+
+const dataUrlToBlob = (dataUrl) => {
+    const [header, payload] = dataUrl.split(",");
+    const mime = (header.match(/data:(.*?);base64/) || ["", "image/jpeg"])[1];
+    const binary = atob(payload);
+    const array = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+        array[i] = binary.charCodeAt(i);
+    }
+    return new Blob([array], { type: mime });
+};
+
+const uploadTechnicalPhoto = async (photo) => {
+    if (photo === null || photo === undefined || photo === "") return null;
+
+    if (typeof photo === "string") {
+        const trimmed = photo.trim();
+        if (!trimmed) return null;
+        if (trimmed.startsWith("http")) return trimmed;
+        if (trimmed.startsWith("data:")) {
+            try {
+                const blob = dataUrlToBlob(trimmed);
+                const formData = new FormData();
+                formData.append("file", blob, `technical-report-${Date.now()}.jpg`);
+                const res = await fetch(API_MEDIA_UPLOAD, {
+                    method: "POST",
+                    credentials: "include",
+                    body: formData,
+                });
+
+                if (res.status === 401 || res.status === 403) {
+                    return trimmed;
+                }
+                if (!res.ok) return null;
+
+                const data = await res.json();
+                return data?.id ?? data?.ID ?? trimmed;
+            } catch (error) {
+                console.warn("Upload media tecnico fallito, mantiene dato locale", error);
+                return trimmed;
+            }
+        }
+        if (/^\d+$/.test(trimmed)) return Number(trimmed);
+        return trimmed;
+    }
+
+    if (typeof photo === "number") return photo;
+    if (typeof photo === "object") {
+        const id = photo.id ?? photo.ID ?? photo.mediaId ?? photo.media_id ?? null;
+        if (id !== null && id !== undefined) return id;
+        const url = photo.url ?? photo.src ?? photo.image ?? photo.link ?? null;
+        if (url) return uploadTechnicalPhoto(url);
+    }
+
+    return null;
+};
+
+const normalizeTechnicalReportForSync = async (report) => {
     const normalized = normalizeTechnicalReport(report);
+    const syncBlades = {};
+
+    for (const blade of ["A", "B", "C"]) {
+        syncBlades[blade] = await Promise.all((normalized.blades?.[blade] || []).map(async (item = {}) => {
+            const photoList = Array.isArray(item.photos) ? item.photos : [];
+            const uploadedPhotos = await Promise.all(photoList.map(async (photo) => uploadTechnicalPhoto(photo)));
+
+            return {
+                ...item,
+                radius: item.radius || "",
+                position: item.position || "",
+                task: item.task || "",
+                description: item.description || "",
+                photos: uploadedPhotos.filter((value) => value !== null && value !== undefined && value !== ""),
+            };
+        }));
+    }
 
     return {
-        type: "technical-report",
+        ...normalized,
+        blades: syncBlades,
+    };
+};
+
+const buildSyncPayload = async (report) => {
+    const normalized = await normalizeTechnicalReportForSync(report);
+
+    return {
+        type: "report",
         reportId: normalized.id,
         localId: normalized.id,
         lastModified: normalized.lastModified,
         data: normalized,
     };
+};
+
+const getTimeValue = (value) => {
+    if (!value) return 0;
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const countPhotosInBlades = (blades = {}) => {
+    const total = ["A", "B", "C"].reduce((sum, blade) => {
+        const items = Array.isArray(blades?.[blade]) ? blades[blade] : [];
+        return sum + items.reduce((count, item) => {
+            if (!item || !Array.isArray(item.photos)) return count;
+            return count + item.photos.filter(Boolean).length;
+        }, 0);
+    }, 0);
+    return total;
 };
 
 const mergeTechnicalReports = (serverReports = [], localReports = []) => {
@@ -74,21 +203,33 @@ const mergeTechnicalReports = (serverReports = [], localReports = []) => {
         const localReport = localArr.find((item) => String(item.id) === String(serverReport.id));
         if (!localReport) return serverReport;
 
-        const mergedTitle = (localReport.title || "").trim() || (serverReport.title || "").trim() || "Untitled";
+        const localPhotoCount = countPhotosInBlades(localReport.blades);
+        const serverPhotoCount = countPhotosInBlades(serverReport.blades);
+        const localIsNewer = getTimeValue(localReport.lastModified) > getTimeValue(serverReport.lastModified);
+        const serverIsMoreComplete = serverPhotoCount > localPhotoCount || (serverPhotoCount === localPhotoCount && JSON.stringify(serverReport.blades).length > JSON.stringify(localReport.blades).length);
+
+        const useLocal = localIsNewer && !serverIsMoreComplete && localReport.synced === false;
+
+        const mergedTitle = (useLocal ? localReport.title : serverReport.title || localReport.title || "").trim() || "Untitled";
+
+        const mergedInfo = {
+            ...serverReport.info,
+            ...localReport.info,
+        };
+
+        const mergedBlades = {
+            A: useLocal ? (localReport.blades?.A ?? serverReport.blades?.A ?? []) : (serverReport.blades?.A ?? localReport.blades?.A ?? []),
+            B: useLocal ? (localReport.blades?.B ?? serverReport.blades?.B ?? []) : (serverReport.blades?.B ?? localReport.blades?.B ?? []),
+            C: useLocal ? (localReport.blades?.C ?? serverReport.blades?.C ?? []) : (serverReport.blades?.C ?? localReport.blades?.C ?? []),
+        };
 
         return {
             ...serverReport,
             ...localReport,
             title: mergedTitle,
-            info: {
-                ...serverReport.info,
-                ...localReport.info,
-            },
-            blades: {
-                A: localReport.blades?.A?.length ? localReport.blades.A : serverReport.blades?.A || [],
-                B: localReport.blades?.B?.length ? localReport.blades.B : serverReport.blades?.B || [],
-                C: localReport.blades?.C?.length ? localReport.blades.C : serverReport.blades?.C || [],
-            },
+            info: mergedInfo,
+            blades: mergedBlades,
+            lastModified: useLocal ? localReport.lastModified : serverReport.lastModified,
         };
     });
 
@@ -98,30 +239,47 @@ const mergeTechnicalReports = (serverReports = [], localReports = []) => {
         }
     });
 
-    return merged;
+    return merged.sort((a, b) => getTimeValue(b.lastModified) - getTimeValue(a.lastModified));
+};
+
+const normalizePhotoReference = (photo) => {
+    if (photo === null || photo === undefined || photo === "") return null;
+    if (typeof photo === "string") {
+        const trimmed = photo.trim();
+        if (!trimmed) return null;
+        if (trimmed.startsWith("http") || trimmed.startsWith("data:")) return trimmed;
+        if (/^\d+$/.test(trimmed)) return Number(trimmed);
+        return trimmed;
+    }
+    if (typeof photo === "number") return photo;
+    if (typeof photo === "object") {
+        const id = photo.id ?? photo.ID ?? photo.mediaId ?? photo.media_id ?? null;
+        if (id !== null && id !== undefined) return normalizePhotoReference(id);
+        const url = photo.url ?? photo.src ?? photo.image ?? photo.link ?? null;
+        if (url) return normalizePhotoReference(url);
+    }
+    return null;
 };
 
 // --- Fetch immagini tramite endpoint WordPress /blades/v1/image ---
-// Ora accetta sia un oggetto foto che un id (number|string) e normalizza l'id.
+// Accetta URL, data URL, ID numerico, stringa numerica o oggetto con id/url.
 const fetchAndStoreImage = async (photoInput) => {
     try {
-        if (photoInput === null || photoInput === undefined) return null;
+        const normalized = normalizePhotoReference(photoInput);
+        if (!normalized) return null;
 
-        // Normalizza l'id: può essere un numero, una stringa o un oggetto { id } / { ID } / { mediaId }
-        const id =
-            typeof photoInput === "object"
-                ? photoInput.id ?? photoInput.ID ?? photoInput.mediaId ?? null
-                : photoInput;
+        if (typeof normalized === "string" && (normalized.startsWith("http") || normalized.startsWith("data:"))) {
+            return normalized;
+        }
 
-        if (!id && id !== 0) return null;
+        const id = Number(normalized);
+        if (!Number.isFinite(id) || id <= 0) return typeof normalized === "string" ? normalized : null;
 
         const key = `photo_${id}`;
 
-        // Controlla IndexedDB prima
         const cached = await get(key);
         if (cached) return cached;
 
-        // Altrimenti fetch tramite endpoint WordPress
         const url = `https://mirodesign.it/off-line/blades-repair/wp-json/blades/v1/image?id=${id}`;
         const res = await fetch(url);
         if (!res.ok) throw new Error("Errore fetch immagine");
@@ -155,71 +313,68 @@ export const useTechnicalReports = () => {
 
             const prepared = await Promise.all(
                 data.map(async (r) => {
-                    const meta = r.meta || {};
+                    const rawMeta = r.meta || {};
+                    const info = r.info || {};
+                    const incomingBlades = r.blades && Object.keys(r.blades).length ? r.blades : {
+                        A: rawMeta.items_of_blade_a || [],
+                        B: rawMeta.items_of_blade_b || [],
+                        C: rawMeta.items_of_blade_c || [],
+                    };
 
                     const parseBladeItems = async (items, bladeLetter) => {
-                        if (!items || !Array.isArray(items)) return [];
-                        return Promise.all(
-                            items.map(async (item) => {
-                                // Prendi le foto raw (possono essere url, id numerici, stringhe numeriche o oggetti)
-                                const rawPhotos = item[`photo_${bladeLetter.toLowerCase()}`] || [];
+                        const source = Array.isArray(items) ? items : items ? [items] : [];
 
-                                // Normalizza: mantieni URL/data:, estrai id da oggetti, lascia numeri/stringhe numeriche
-                                const normalized = rawPhotos
-                                    .map((p) => {
-                                        if (!p && p !== 0) return null;
-                                        if (typeof p === "string") return p;
-                                        if (typeof p === "object") return p.id ?? p.ID ?? p.mediaId ?? null;
-                                        return p;
-                                    })
+                        return Promise.all(
+                            source.filter((item) => item && typeof item === "object").map(async (item) => {
+                                const photoKey = `photo_${bladeLetter.toLowerCase()}`;
+                                const editorKey = `editor_${bladeLetter.toLowerCase()}`;
+                                const rawPhotos = item[photoKey] ?? item.photos ?? [];
+                                const photoList = Array.isArray(rawPhotos) ? rawPhotos : (rawPhotos ? [rawPhotos] : []);
+
+                                const normalized = photoList
+                                    .map((p) => normalizePhotoReference(p))
                                     .filter(Boolean);
 
-                                // Per ogni voce: se è già un URL (http o data:) lo uso; altrimenti provo a fetchare tramite id
                                 const photos = await Promise.all(
-                                    normalized.map(async (np) => {
-                                        if (typeof np === "string" && (np.startsWith("http") || np.startsWith("data:"))) {
-                                            return np;
-                                        }
-                                        // se è stringa numerica, converto in number
-                                        const id = typeof np === "string" && /^\d+$/.test(np) ? Number(np) : np;
-                                        return await fetchAndStoreImage(id);
-                                    })
+                                    normalized.map(async (np) => fetchAndStoreImage(np))
                                 );
 
                                 return {
                                     radius: item.radius || "",
                                     position: item.position || "",
-                                    task: item.completed_task || "",
-                                    description: item[`editor_${bladeLetter.toLowerCase()}`] || "",
+                                    task: item.completed_task || item.task || "",
+                                    description: item[editorKey] || item.description || "",
                                     photos: photos.filter(Boolean),
                                 };
                             })
                         );
                     };
 
+                    const title = r.title?.rendered || r.title || info.name || rawMeta.name || "";
+
                     return {
                         id: r.id,
-                        title: r.title?.rendered || meta.name || "",
+                        title,
                         info: {
-                            name: meta.name || r.title?.rendered || "",
-                            customer: meta.customer || "",
-                            windfarm: meta.windfarm || "",
-                            wtgId: meta["wtg-id-nr"] || "",
-                            wtgType: meta.wtg_type || "",
-                            hubHeight: meta.hub_height || "",
-                            repairBy: meta.repair_completed_by || "Blades Repair Srl",
-                            technician: meta.service_technician || "",
-                            startDate: formatDateForInput(meta.start_date),
-                            endDate: formatDateForInput(meta.end_date),
-                            reportDate: formatDateForInput(meta.report_issue_date),
+                            name: info.name || rawMeta.name || title || "",
+                            customer: info.customer || rawMeta.customer || "",
+                            windfarm: info.windfarm || rawMeta.windfarm || "",
+                            wtgId: info.wtgId || rawMeta["wtg-id-nr"] || "",
+                            wtgType: info.wtgType || rawMeta.wtg_type || "",
+                            hubHeight: info.hubHeight || rawMeta.hub_height || "",
+                            repairBy: info.repairBy || rawMeta.repair_completed_by || "Blades Repair Srl",
+                            technician: info.technician || rawMeta.service_technician || "",
+                            startDate: formatDateForInput(info.startDate || rawMeta.start_date),
+                            endDate: formatDateForInput(info.endDate || rawMeta.end_date),
+                            reportDate: formatDateForInput(info.reportDate || rawMeta.report_issue_date),
                         },
                         blades: {
-                            A: await parseBladeItems(meta.items_of_blade_a, "A"),
-                            B: await parseBladeItems(meta.items_of_blade_b, "B"),
-                            C: await parseBladeItems(meta.items_of_blade_c, "C"),
+                            A: await parseBladeItems(incomingBlades.A ?? rawMeta.items_of_blade_a, "A"),
+                            B: await parseBladeItems(incomingBlades.B ?? rawMeta.items_of_blade_b, "B"),
+                            C: await parseBladeItems(incomingBlades.C ?? rawMeta.items_of_blade_c, "C"),
                         },
                         synced: true,
-                        lastModified: r.modified,
+                        lastModified: r.modified || r.lastModified,
                     };
                 })
             );
@@ -245,7 +400,8 @@ export const useTechnicalReports = () => {
             return updated;
         });
 
-        await addToSyncQueue(buildSyncPayload(normalized));
+        const payload = await buildSyncPayload(normalized);
+        await addToSyncQueue(payload);
         if (navigator.onLine) {
             await syncNow();
         }

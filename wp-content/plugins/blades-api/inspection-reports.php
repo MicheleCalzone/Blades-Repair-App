@@ -84,7 +84,9 @@ function blades_parse_blade_hotspots($raw, $suffix) {
     $data_points_key = 'data_points' . $suffix;
     $data_points = isset($hotspot[$data_points_key]) && is_array($hotspot[$data_points_key])
         ? $hotspot[$data_points_key]
-        : [];
+        : (isset($hotspot['data_points']) && is_array($hotspot['data_points'])
+            ? $hotspot['data_points']
+            : $hotspot);
 
     $results = [];
 

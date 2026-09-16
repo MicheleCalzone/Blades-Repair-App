@@ -4,7 +4,54 @@ import { Editor } from "@tinymce/tinymce-react";
 import IconTrash from "../assets/IconTrash.jsx";
 import IconEdit from "../assets/IconEdit.jsx";
 import { useTechnicalReports } from "../hooks/useTechnicalReports";
-import { get } from "idb-keyval";
+import { get, set } from "idb-keyval";
+
+const normalizePhotoReference = (photo) => {
+    if (photo === null || photo === undefined || photo === "") return null;
+    if (typeof photo === "string") {
+        const trimmed = photo.trim();
+        if (!trimmed) return null;
+        if (trimmed.startsWith("http") || trimmed.startsWith("data:")) return trimmed;
+        if (/^\d+$/.test(trimmed)) return Number(trimmed);
+        return trimmed;
+    }
+    if (typeof photo === "number") return photo;
+    if (typeof photo === "object") {
+        const id = photo.id ?? photo.ID ?? photo.mediaId ?? photo.media_id ?? null;
+        if (id !== null && id !== undefined) return normalizePhotoReference(id);
+        const url = photo.url ?? photo.src ?? photo.image ?? photo.link ?? null;
+        if (url) return normalizePhotoReference(url);
+    }
+    return null;
+};
+
+const fetchPhotoUrl = async (photoInput) => {
+    try {
+        const normalized = normalizePhotoReference(photoInput);
+        if (!normalized) return null;
+        if (typeof normalized === "string" && (normalized.startsWith("http") || normalized.startsWith("data:"))) {
+            return normalized;
+        }
+
+        const id = Number(normalized);
+        if (!Number.isFinite(id) || id <= 0) return typeof normalized === "string" ? normalized : null;
+
+        const cached = await get(`photo_${id}`);
+        if (cached) return cached;
+
+        const res = await fetch(`https://mirodesign.it/off-line/blades-repair/wp-json/blades/v1/image?id=${id}`);
+        if (!res.ok) return null;
+
+        const data = await res.json();
+        if (!data || !data.url) return null;
+
+        await set(`photo_${id}`, data.url);
+        return data.url;
+    } catch (error) {
+        console.error("Errore risoluzione foto tecnica", error);
+        return null;
+    }
+};
 
 const TechnicalReportsNew = () => {
     const { id } = useParams();
@@ -29,8 +76,15 @@ const TechnicalReportsNew = () => {
     const [title, setTitle] = useState("");
     const [info, setInfo] = useState(emptyInfo);
     const [blades, setBlades] = useState(emptyBlades);
+    const [pageNotice, setPageNotice] = useState(null);
 
     const reportToEdit = id ? reports.find((r) => r.id.toString() === id) : null;
+
+    useEffect(() => {
+        if (!pageNotice) return;
+        const timer = setTimeout(() => setPageNotice(null), 3500);
+        return () => clearTimeout(timer);
+    }, [pageNotice]);
 
     useEffect(() => {
         if (!id || !reportToEdit) {
@@ -46,17 +100,12 @@ const TechnicalReportsNew = () => {
             for (const blade of ["A", "B", "C"]) {
                 for (let i = 0; i < bladesCopy[blade].length; i++) {
                     const item = bladesCopy[blade][i];
-                    if (item.photos && item.photos.length > 0) {
-                        const photosBase64 = await Promise.all(
-                            item.photos.map(async (photo) => {
-                                if (typeof photo === "string" && (photo.startsWith("http") || photo.startsWith("data:"))) {
-                                    return photo;
-                                }
-                                const cached = await get(`photo_${photo.id || photo}`);
-                                return cached || null;
-                            })
+                    const photoList = Array.isArray(item?.photos) ? item.photos : [];
+                    if (photoList.length > 0) {
+                        const photosResolved = await Promise.all(
+                            photoList.map(async (photo) => fetchPhotoUrl(photo))
                         );
-                        bladesCopy[blade][i].photos = photosBase64.filter(Boolean);
+                        bladesCopy[blade][i].photos = photosResolved.filter(Boolean);
                     }
                 }
             }
@@ -154,9 +203,10 @@ const TechnicalReportsNew = () => {
         };
 
         await saveReportOffline(newReport);
-        alert(reportToEdit ? "Report aggiornato offline!" : "Report creato offline!");
-
-        navigate("/technical-reports");
+        setPageNotice({
+            type: 'success',
+            text: reportToEdit ? 'Report aggiornato offline!' : 'Report creato offline!'
+        });
     };
 
     if (!info || !blades) return <div className="page-container page-technical-report-new"><h2>Caricamento dati...</h2></div>;
@@ -276,6 +326,12 @@ const TechnicalReportsNew = () => {
                 <div className="form-actions">
                     <button type="submit" className="btn btn-save">{reportToEdit ? "Aggiorna Report" : "Salva Report"}</button>
                 </div>
+
+                {pageNotice && (
+                    <div className={`page-notice page-notice-${pageNotice.type}`} role="status" aria-live="polite">
+                        {pageNotice.text}
+                    </div>
+                )}
 
             </form>
         </div>

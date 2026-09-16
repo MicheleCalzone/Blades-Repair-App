@@ -1,8 +1,8 @@
 // javascript
 // src/pages/InspectionReportNew.jsx
 import React, { useState, useRef, useMemo, useEffect } from "react";
-import { Editor } from "@tinymce/tinymce-react";
 import { useParams, useNavigate } from "react-router-dom";
+import { Editor } from "@tinymce/tinymce-react";
 import useInspectionReports from "../hooks/useInspectionReports";
 import hotspotPin from "../assets/hotspot-pin.svg";
 
@@ -23,7 +23,7 @@ const emptyDamage = {
 const InspectionReportsNew = () => {
     const { id } = useParams();
     const navigate = useNavigate();
-    const { reports, setReports, loading } = useInspectionReports();
+    const { reports, setReports, loading, saveReportOffline } = useInspectionReports();
     const [title, setTitle] = useState("");
 
     const [info, setInfo] = useState({
@@ -42,6 +42,22 @@ const InspectionReportsNew = () => {
     const [currentDamageIndex, setCurrentDamageIndex] = useState(null);
     const [newDamage, setNewDamage] = useState(emptyDamage);
     const [serverPhotos, setServerPhotos] = useState([]);
+    const [pageNotice, setPageNotice] = useState(null);
+
+    const editorConfig = {
+        height: 200,
+        menubar: false,
+        plugins: ["advlist", "lists", "link", "image", "code"],
+        toolbar: "undo redo | bold italic | bullist numlist | link image | code",
+        branding: false,
+        base_url: "/tinymce/js/tinymce",
+        suffix: ".min",
+        skin: "oxide",
+        skin_url: "/tinymce/js/tinymce/skins/ui/oxide",
+        content_css: "/tinymce/js/tinymce/skins/content/default/content.css",
+        license_key: "gpl",
+        tinymce_script_src: "/tinymce/js/tinymce/tinymce.min.js",
+    };
 
     const reportToEdit = useMemo(() => (id ? reports.find((r) => String(r.id) === String(id)) : null), [id, reports]);
 
@@ -115,6 +131,12 @@ const InspectionReportsNew = () => {
         };
     }, [modalOpen]);
 
+    useEffect(() => {
+        if (!pageNotice) return;
+        const timer = setTimeout(() => setPageNotice(null), 3500);
+        return () => clearTimeout(timer);
+    }, [pageNotice]);
+
     // Import attachments (media) dal server per questo report
     const importAttachments = async () => {
         try {
@@ -128,7 +150,7 @@ const InspectionReportsNew = () => {
             setServerPhotos(urls);
         } catch (e) {
             console.error('Import attachments failed', e);
-            alert('Impossibile importare allegati dal server');
+            setPageNotice({ type: 'error', text: 'Impossibile importare allegati dal server' });
         }
     };
 
@@ -184,7 +206,7 @@ const InspectionReportsNew = () => {
         setNewDamage((prev) => ({ ...prev, photos: newPhotos, previews: newPreviews }));
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         const normalizedTitle = (title || "").trim();
         const finalTitle = normalizedTitle || `Report Ispezione ${new Date().toLocaleDateString("it-IT")}`;
@@ -196,13 +218,11 @@ const InspectionReportsNew = () => {
             synced: reportToEdit?.synced || false,
             lastModified: new Date().toISOString(),
         };
-        const updatedReports = reportToEdit
-            ? reports.map((r) => (String(r.id) === String(reportToEdit.id) ? report : r))
-            : [...reports, report];
-        setReports(updatedReports);
-        localStorage.setItem("inspectionReports", JSON.stringify(updatedReports));
-        alert(reportToEdit ? "Report aggiornato offline!" : "Report salvato offline!");
-        navigate("/inspection-reports");
+        await saveReportOffline(report);
+        setPageNotice({
+            type: 'success',
+            text: reportToEdit ? 'Report aggiornato!' : 'Report salvato!'
+        });
     };
 
     // Se abbiamo un id ma il report non è trovato (dopo caricamento), mostra avviso
@@ -271,7 +291,7 @@ const InspectionReportsNew = () => {
                         </button>
 
                         <div className="blade-image-container">
-                            <img src={`/images/pala_${(info.bladeType || "other").toLowerCase()}.jpg`} alt={`Blade ${blade}`} className="blade-image" />
+                            <img src={getBladeImageSrc(info.bladeType)} alt={`Blade ${blade}`} className="blade-image" />
 
                             {Array.isArray(blades[blade]) && blades[blade].map((damage, i) => (
                                 <div
@@ -291,6 +311,7 @@ const InspectionReportsNew = () => {
                                     onClick={() => handleHotspotClick(blade, i)}
                                 >
                                     <img src={hotspotPin} alt="Hotspot danno" />
+                                    <span className="hotspot-number">{i + 1}</span>
                                 </div>
                             ))}
                         </div>
@@ -308,6 +329,12 @@ const InspectionReportsNew = () => {
                 <div className="form-actions">
                     <button type="submit" className="btn btn-save">{reportToEdit ? "Aggiorna Report" : "Salva Report"}</button>
                 </div>
+
+                {pageNotice && (
+                    <div className={`page-notice page-notice-${pageNotice.type}`} role="status" aria-live="polite">
+                        {pageNotice.text}
+                    </div>
+                )}
             </form>
 
             {modalOpen && (
@@ -315,28 +342,11 @@ const InspectionReportsNew = () => {
                     <div className="modal-content">
                         <h3>{`Info Fault Number ${(currentDamageIndex ?? 0) + 1}`}</h3>
                         <label>Description</label>
-                        {typeof window !== 'undefined' ? (
-                            <Editor
-                                value={newDamage.description}
-                                init={{
-                                    height: 200,
-                                    menubar: false,
-                                    plugins: ["advlist", "autolink", "lists", "link", "image", "table", "code"],
-                                    toolbar:
-                                        "undo redo | formatselect | bold italic underline | alignleft aligncenter alignright | bullist numlist | link image | code",
-                                    base_url: "/tinymce/js/tinymce",
-                                    suffix: ".min",
-                                    skin: "oxide",
-                                    skin_url: "/tinymce/js/tinymce/skins/ui/oxide",
-                                    content_css: "/tinymce/js/tinymce/skins/content/default/content.css",
-                                    license_key: "gpl",
-                                    tinymce_script_src: "/tinymce/js/tinymce/tinymce.min.js",
-                                }}
-                                onEditorChange={(content) => setNewDamage((prev) => ({ ...prev, description: content }))}
-                            />
-                        ) : (
-                            <textarea value={newDamage.description || ""} onChange={(e) => setNewDamage((prev) => ({ ...prev, description: e.target.value }))} />
-                        )}
+                        <Editor
+                            value={newDamage.description || ""}
+                            init={editorConfig}
+                            onEditorChange={(content) => setNewDamage((prev) => ({ ...prev, description: content }))}
+                        />
 
                         <label>Short Description</label>
                         <input type="text" value={newDamage.shortDescription || ""} onChange={(e) => setNewDamage((prev) => ({ ...prev, shortDescription: e.target.value }))} />
@@ -401,3 +411,7 @@ const InspectionReportsNew = () => {
 };
 
 export default InspectionReportsNew;
+    const getBladeImageSrc = (bladeType) => {
+        const normalizedType = (bladeType || "other").toLowerCase();
+        return `/images/pala_${normalizedType}.jpg`;
+    };
