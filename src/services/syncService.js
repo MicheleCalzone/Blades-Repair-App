@@ -1,4 +1,5 @@
 import { get, set } from "idb-keyval";
+import { withAuth } from "./auth";
 
 const SYNC_KEY = "syncQueue";
 const API_SYNC = "https://mirodesign.it/off-line/blades-repair/wp-json/blades/v1/report";
@@ -93,12 +94,12 @@ export const addToSyncQueue = async (item) => {
 
 const postSyncItem = async (item) => {
     const endpoint = item?.type === "inspection-report" ? API_INSPECTION_SYNC : API_SYNC;
-    const res = await fetch(endpoint, {
+    const res = await fetch(endpoint, withAuth({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(item),
-    });
+    }));
 
     if (!res.ok) throw new Error("Errore sync");
 

@@ -5,6 +5,9 @@ import IconTrash from "../assets/IconTrash.jsx";
 import IconEdit from "../assets/IconEdit.jsx";
 import { useTechnicalReports } from "../hooks/useTechnicalReports";
 import { get, set } from "idb-keyval";
+import { withAuth } from "../services/auth";
+
+const TINYMCE_BASE_URL = `${import.meta.env.BASE_URL}tinymce/js/tinymce`;
 
 const normalizePhotoReference = (photo) => {
     if (photo === null || photo === undefined || photo === "") return null;
@@ -39,7 +42,7 @@ const fetchPhotoUrl = async (photoInput) => {
         const cached = await get(`photo_${id}`);
         if (cached) return cached;
 
-        const res = await fetch(`https://mirodesign.it/off-line/blades-repair/wp-json/blades/v1/image?id=${id}`);
+        const res = await fetch(`https://mirodesign.it/off-line/blades-repair/wp-json/blades/v1/image?id=${id}`, withAuth({ method: "GET" }));
         if (!res.ok) return null;
 
         const data = await res.json();
@@ -52,6 +55,17 @@ const fetchPhotoUrl = async (photoInput) => {
         return null;
     }
 };
+
+const cloneBladeItem = (item = {}) => ({
+    ...item,
+    photos: Array.isArray(item.photos) ? [...item.photos] : [],
+});
+
+const cloneBladeState = (bladesState = emptyBlades) => ({
+    A: Array.isArray(bladesState.A) ? bladesState.A.map(cloneBladeItem) : [],
+    B: Array.isArray(bladesState.B) ? bladesState.B.map(cloneBladeItem) : [],
+    C: Array.isArray(bladesState.C) ? bladesState.C.map(cloneBladeItem) : [],
+});
 
 const TechnicalReportsNew = () => {
     const { id } = useParams();
@@ -77,6 +91,7 @@ const TechnicalReportsNew = () => {
     const [info, setInfo] = useState(emptyInfo);
     const [blades, setBlades] = useState(emptyBlades);
     const [pageNotice, setPageNotice] = useState(null);
+    const [isSaving, setIsSaving] = useState(false);
 
     const reportToEdit = id ? reports.find((r) => r.id.toString() === id) : null;
 
@@ -95,7 +110,7 @@ const TechnicalReportsNew = () => {
         }
 
         const loadPhotos = async () => {
-            const bladesCopy = { ...reportToEdit.blades };
+            const bladesCopy = cloneBladeState(reportToEdit.blades || emptyBlades);
 
             for (const blade of ["A", "B", "C"]) {
                 for (let i = 0; i < bladesCopy[blade].length; i++) {
@@ -105,7 +120,7 @@ const TechnicalReportsNew = () => {
                         const photosResolved = await Promise.all(
                             photoList.map(async (photo) => fetchPhotoUrl(photo))
                         );
-                        bladesCopy[blade][i].photos = photosResolved.filter(Boolean);
+                        bladesCopy[blade][i] = { ...item, photos: photosResolved.filter(Boolean) };
                     }
                 }
             }
@@ -127,26 +142,25 @@ const TechnicalReportsNew = () => {
 
     const addBladeItem = (blade) => {
         setBlades((prev) => ({
-            ...prev,
-            [blade]: [...prev[blade], { radius: "", position: "", task: "", description: "", photos: [] }],
+            ...cloneBladeState(prev),
+            [blade]: [...(prev[blade] || []), { radius: "", position: "", task: "", description: "", photos: [] }],
         }));
     };
 
     const removeBladeItem = (blade, index) => {
-        const updated = [...blades[blade]];
-        updated.splice(index, 1);
-        setBlades((prev) => ({ ...prev, [blade]: updated }));
+        const updated = [...(blades[blade] || [])].filter((_, i) => i !== index);
+        setBlades((prev) => ({ ...cloneBladeState(prev), [blade]: updated }));
     };
 
     const handleBladeItemChange = (blade, index, field, value) => {
-        const updated = [...blades[blade]];
-        updated[index][field] = value;
-        setBlades((prev) => ({ ...prev, [blade]: updated }));
+        const updated = [...(blades[blade] || [])];
+        updated[index] = { ...updated[index], [field]: value };
+        setBlades((prev) => ({ ...cloneBladeState(prev), [blade]: updated }));
     };
 
     // --- Foto ---
     const handlePhotoUpload = (blade, index, files) => {
-        const updated = [...blades[blade]];
+        const updated = [...(blades[blade] || [])];
 
         const readFiles = Array.from(files).map((file) => {
             return new Promise((resolve) => {
@@ -157,8 +171,10 @@ const TechnicalReportsNew = () => {
         });
 
         Promise.all(readFiles).then((results) => {
-            updated[index].photos = [...updated[index].photos, ...results];
-            setBlades((prev) => ({ ...prev, [blade]: updated }));
+            const currentItem = { ...updated[index], photos: [...(updated[index]?.photos || [])] };
+            currentItem.photos = [...currentItem.photos, ...results];
+            updated[index] = currentItem;
+            setBlades((prev) => ({ ...cloneBladeState(prev), [blade]: updated }));
         });
     };
 
@@ -170,17 +186,21 @@ const TechnicalReportsNew = () => {
     const handleDragOver = (e) => e.preventDefault();
 
     const removePhoto = (blade, index, photoIndex) => {
-        const updated = [...blades[blade]];
-        updated[index].photos.splice(photoIndex, 1);
-        setBlades((prev) => ({ ...prev, [blade]: updated }));
+        const updated = [...(blades[blade] || [])];
+        const currentItem = { ...updated[index], photos: [...(updated[index]?.photos || [])] };
+        currentItem.photos.splice(photoIndex, 1);
+        updated[index] = currentItem;
+        setBlades((prev) => ({ ...cloneBladeState(prev), [blade]: updated }));
     };
 
     const editPhoto = (blade, index, photoIndex, file) => {
         const reader = new FileReader();
         reader.onloadend = () => {
-            const updated = [...blades[blade]];
-            updated[index].photos[photoIndex] = reader.result;
-            setBlades((prev) => ({ ...prev, [blade]: updated }));
+            const updated = [...(blades[blade] || [])];
+            const currentItem = { ...updated[index], photos: [...(updated[index]?.photos || [])] };
+            currentItem.photos[photoIndex] = reader.result;
+            updated[index] = currentItem;
+            setBlades((prev) => ({ ...cloneBladeState(prev), [blade]: updated }));
         };
         reader.readAsDataURL(file);
     };
@@ -188,25 +208,38 @@ const TechnicalReportsNew = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        const normalizedTitle = (title || info.name || "").trim();
-        const finalTitle = normalizedTitle || `Report Tecnico ${new Date().toLocaleDateString("it-IT")}`;
-        const newReport = {
-            id: reportToEdit?.id || Date.now(),
-            title: finalTitle,
-            info: {
-                ...info,
-                name: normalizedTitle,
-            },
-            blades,
-            synced: false,
-            lastModified: new Date().toISOString(),
-        };
+        if (isSaving) return;
 
-        await saveReportOffline(newReport);
-        setPageNotice({
-            type: 'success',
-            text: reportToEdit ? 'Report aggiornato offline!' : 'Report creato offline!'
-        });
+        setIsSaving(true);
+
+        try {
+            const normalizedTitle = (title || info.name || "").trim();
+            const finalTitle = normalizedTitle || `Report Tecnico ${new Date().toLocaleDateString("it-IT")}`;
+            const newReport = {
+                id: reportToEdit?.id || Date.now(),
+                title: finalTitle,
+                info: {
+                    ...info,
+                    name: normalizedTitle,
+                },
+                blades,
+                synced: false,
+                lastModified: new Date().toISOString(),
+            };
+
+            await saveReportOffline(newReport);
+            setPageNotice({
+                type: 'success',
+                text: reportToEdit ? 'Report aggiornato offline!' : 'Report creato offline!'
+            });
+        } catch (error) {
+            setPageNotice({
+                type: 'error',
+                text: error?.message || 'Errore durante il salvataggio del report',
+            });
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     if (!info || !blades) return <div className="page-container page-technical-report-new"><h2>Caricamento dati...</h2></div>;
@@ -278,13 +311,13 @@ const TechnicalReportsNew = () => {
                                         plugins: ['advlist', 'lists', 'link', 'image', 'code'],
                                         toolbar: 'undo redo | bold italic | bullist numlist | link image | code',
                                         branding: false,
-                                        base_url: "/tinymce/js/tinymce",
+                                        base_url: TINYMCE_BASE_URL,
                                         suffix: ".min",
                                         skin: "oxide",
-                                        skin_url: "/tinymce/js/tinymce/skins/ui/oxide",
-                                        content_css: "/tinymce/js/tinymce/skins/content/default/content.css",
+                                        skin_url: `${TINYMCE_BASE_URL}/skins/ui/oxide`,
+                                        content_css: `${TINYMCE_BASE_URL}/skins/content/default/content.css`,
                                         license_key: "gpl",
-                                        tinymce_script_src: "/tinymce/js/tinymce/tinymce.min.js",
+                                        tinymce_script_src: `${TINYMCE_BASE_URL}/tinymce.min.js`,
                                     }}
                                     onEditorChange={(content) => handleBladeItemChange(blade, index, "description", content)}
                                 />
@@ -324,7 +357,13 @@ const TechnicalReportsNew = () => {
                 ))}
 
                 <div className="form-actions">
-                    <button type="submit" className="btn btn-save">{reportToEdit ? "Aggiorna Report" : "Salva Report"}</button>
+                    <button type="submit" className="btn btn-save" disabled={isSaving}>
+                        {isSaving ? (
+                            <span className="btn-loader" aria-label="Salvataggio in corso" title="Salvataggio in corso" />
+                        ) : (
+                            reportToEdit ? "Aggiorna Report" : "Salva Report"
+                        )}
+                    </button>
                 </div>
 
                 {pageNotice && (

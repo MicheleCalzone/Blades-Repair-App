@@ -70,25 +70,25 @@ add_action('rest_api_init', function () {
     register_rest_route('blades/v1', '/report', [
         'methods' => 'POST',
         'callback' => 'blades_sync_report',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'blades_auth_require_token',
     ]);
 
     register_rest_route('blades/v1', '/inspection-report', [
         'methods' => 'POST',
         'callback' => 'blades_sync_inspection_report',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'blades_auth_require_token',
     ]);
 
     register_rest_route('blades/v1', '/technical-reports', [
         'methods' => 'GET',
         'callback' => 'blades_get_technical_reports',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'blades_auth_require_token',
     ]);
 
     register_rest_route('blades/v1', '/technical-report/(?P<id>\d+)', [
         'methods' => 'GET',
         'callback' => 'blades_get_technical_report',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'blades_auth_require_token',
     ]);
 });
 
@@ -296,6 +296,18 @@ function blades_save_technical_report_meta($post_id, $data) {
 function blades_save_technical_blade_meta($post_id, $bladeLetter, $items) {
     $list = is_array($items) ? $items : ($items ? [$items] : []);
     $normalized = [];
+    $bladePhotos = [];
+    $bladeEditors = [];
+
+    $legacyKeys = [
+        'items_of_blade_' . strtolower($bladeLetter),
+        'photo_' . strtolower($bladeLetter),
+        'editor_' . strtolower($bladeLetter),
+    ];
+
+    foreach ($legacyKeys as $legacyKey) {
+        delete_post_meta($post_id, $legacyKey);
+    }
 
     foreach ($list as $item) {
         if (!is_array($item)) {
@@ -356,10 +368,20 @@ function blades_save_technical_blade_meta($post_id, $bladeLetter, $items) {
             'photos' => $photoValues,
             $photoKey => $photoValues,
         ];
+
+        if (!empty($photoValues)) {
+            $bladePhotos = array_merge($bladePhotos, $photoValues);
+        }
+
+        if ($description !== '') {
+            $bladeEditors[] = $description;
+        }
     }
 
     $metaValue = count($normalized) === 1 ? $normalized[0] : $normalized;
     update_post_meta($post_id, 'items_of_blade_' . strtolower($bladeLetter), $metaValue);
+    update_post_meta($post_id, 'photo_' . strtolower($bladeLetter), $bladePhotos);
+    update_post_meta($post_id, 'editor_' . strtolower($bladeLetter), $bladeEditors);
 }
 
 function blades_technical_photo_to_media_id($photo) {
@@ -393,7 +415,33 @@ function blades_technical_photo_to_media_id($photo) {
     }
 
     $mediaId = attachment_url_to_postid($photo);
-    return $mediaId ? intval($mediaId) : null;
+    if ($mediaId) {
+        return intval($mediaId);
+    }
+
+    if (!function_exists('download_url') || !function_exists('media_handle_sideload')) {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+    }
+
+    $tmp = download_url($photo);
+    if (is_wp_error($tmp)) {
+        return null;
+    }
+
+    $file_array = [
+        'name' => basename(parse_url($photo, PHP_URL_PATH)) ?: 'remote-photo.jpg',
+        'tmp_name' => $tmp,
+    ];
+
+    $sideloaded = media_handle_sideload($file_array, 0, null, ['post_status' => 'inherit']);
+    @unlink($tmp);
+
+    if (is_wp_error($sideloaded)) {
+        return null;
+    }
+
+    return intval($sideloaded);
 }
 
 function blades_sync_inspection_report($request) {

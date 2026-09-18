@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { addToSyncQueue, clearQueuedSyncItem } from "../services/syncService";
+import { withAuth } from "../services/auth";
 
 const API_BASE = "https://mirodesign.it/off-line/blades-repair/wp-json/blades/v1";
 const API_INSPECTION_REPORTS = `${API_BASE}/inspection-reports?per_page=100`;
 const API_INSPECTION_REPORTS_LEGACY =
     "https://mirodesign.it/off-line/blades-repair/wp-json/wp/v2/points_image?per_page=100";
-const API_MEDIA_UPLOAD = "https://mirodesign.it/off-line/blades-repair/wp-json/wp/v2/media";
+const API_MEDIA_UPLOAD = "https://mirodesign.it/off-line/blades-repair/wp-json/blades/v1/media";
 
 const emptyInfo = {
     windFarm: "",
@@ -41,11 +42,11 @@ const uploadInspectionPhoto = async (file) => {
     const formData = new FormData();
     formData.append("file", file);
 
-    const response = await fetch(API_MEDIA_UPLOAD, {
+    const response = await fetch(API_MEDIA_UPLOAD, withAuth({
         method: "POST",
         credentials: "include",
         body: formData,
-    });
+    }));
 
     if (!response.ok) {
         throw new Error("Errore upload foto ispezione");
@@ -116,12 +117,12 @@ const buildSyncPayload = async (report) => {
 };
 
 const postInspectionReport = async (payload) => {
-    const response = await fetch(`${API_BASE}/inspection-report`, {
+    const response = await fetch(`${API_BASE}/inspection-report`, withAuth({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-    });
+    }));
 
     if (!response.ok) throw new Error("Errore sync ispezioni");
     const result = await response.json();
@@ -195,12 +196,12 @@ const useInspectionReports = () => {
             setReports(localNormalized);
 
             let serverData = [];
-            const response = await fetch(API_INSPECTION_REPORTS);
+            const response = await fetch(API_INSPECTION_REPORTS, withAuth({ method: "GET" }));
 
             if (response.ok) {
                 serverData = await response.json();
             } else {
-                const legacyResponse = await fetch(API_INSPECTION_REPORTS_LEGACY);
+                const legacyResponse = await fetch(API_INSPECTION_REPORTS_LEGACY, withAuth({ method: "GET" }));
                 if (!legacyResponse.ok) {
                     throw new Error("Errore caricamento report di ispezione");
                 }

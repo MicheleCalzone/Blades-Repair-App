@@ -1,37 +1,20 @@
 <!doctype html>
-<html lang="en">
+<html lang="it">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/off-line/blades-repair/blades-app/src/assets/logo.svg" />
+    <link rel="apple-touch-icon" href="/off-line/blades-repair/blades-app/pwa-192.png" />
+    <link rel="manifest" href="/off-line/blades-repair/blades-app/manifest.webmanifest" />
+    <meta name="theme-color" content="#4FAF41" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Blades Repair" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Blades Repair App</title>
 
-    <script src="/tinymce/js/tinymce/tinymce.min.js"></script>
-
-    <style>
-      #app-status {
-        position: fixed;
-        right: 12px;
-        bottom: 12px;
-        background: rgba(0,0,0,0.7);
-        color: #fff;
-        padding: 6px 10px;
-        border-radius: 6px;
-        font-size: 12px;
-        z-index: 99999;
-      }
-    </style>
+    <script src="/off-line/blades-repair/blades-app/tinymce/js/tinymce/tinymce.min.js"></script>
   </head>
   <body>
-    <div id="app-status">JS not executed</div>
-    <script>
-      console.log('index.html: loaded');
-      try {
-        document.getElementById('app-status').innerText = 'index.html script executed';
-      } catch(e) {
-        // ignore
-      }
-    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

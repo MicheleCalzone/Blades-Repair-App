@@ -3,9 +3,10 @@
 import { useState, useEffect } from "react";
 import { get, set } from "idb-keyval";
 import { addToSyncQueue, syncNow } from "../services/syncService";
+import { withAuth } from "../services/auth";
 
 const API_REPORT_TECNICI =
-    "https://mirodesign.it/off-line/blades-repair/wp-json/wp/v2/report-tecnici?per_page=10";
+    "https://mirodesign.it/off-line/blades-repair/wp-json/blades/v1/technical-reports?per_page=10";
 
 // Formatta le date in un formato riconosciuto dall'input type="date"
 const formatDateForInput = (dateStr) => {
@@ -82,7 +83,7 @@ const normalizeTechnicalReport = (report = {}) => {
     };
 };
 
-const API_MEDIA_UPLOAD = "https://mirodesign.it/off-line/blades-repair/wp-json/wp/v2/media";
+const API_MEDIA_UPLOAD = "https://mirodesign.it/off-line/blades-repair/wp-json/blades/v1/media";
 
 const dataUrlToBlob = (dataUrl) => {
     const [header, payload] = dataUrl.split(",");
@@ -101,17 +102,40 @@ const uploadTechnicalPhoto = async (photo) => {
     if (typeof photo === "string") {
         const trimmed = photo.trim();
         if (!trimmed) return null;
-        if (trimmed.startsWith("http")) return trimmed;
+        if (trimmed.startsWith("http")) {
+            try {
+                const res = await fetch(API_MEDIA_UPLOAD, withAuth({
+                    method: "POST",
+                    credentials: "include",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Accept: "application/json",
+                    },
+                    body: JSON.stringify({ url: trimmed }),
+                }));
+
+                if (res.status === 401 || res.status === 403) {
+                    return trimmed;
+                }
+                if (!res.ok) return trimmed;
+
+                const data = await res.json();
+                return data?.id ?? data?.ID ?? trimmed;
+            } catch (error) {
+                console.warn("Import media remoto fallito, mantiene URL locale", error);
+                return trimmed;
+            }
+        }
         if (trimmed.startsWith("data:")) {
             try {
                 const blob = dataUrlToBlob(trimmed);
                 const formData = new FormData();
                 formData.append("file", blob, `technical-report-${Date.now()}.jpg`);
-                const res = await fetch(API_MEDIA_UPLOAD, {
+                const res = await fetch(API_MEDIA_UPLOAD, withAuth({
                     method: "POST",
                     credentials: "include",
                     body: formData,
-                });
+                }));
 
                 if (res.status === 401 || res.status === 403) {
                     return trimmed;
@@ -184,15 +208,32 @@ const getTimeValue = (value) => {
     return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const countPhotosInBladeItems = (items = []) => {
+    const arr = Array.isArray(items) ? items : [];
+    return arr.reduce((count, item) => {
+        if (!item || !Array.isArray(item.photos)) return count;
+        return count + item.photos.filter(Boolean).length;
+    }, 0);
+};
+
 const countPhotosInBlades = (blades = {}) => {
     const total = ["A", "B", "C"].reduce((sum, blade) => {
-        const items = Array.isArray(blades?.[blade]) ? blades[blade] : [];
-        return sum + items.reduce((count, item) => {
-            if (!item || !Array.isArray(item.photos)) return count;
-            return count + item.photos.filter(Boolean).length;
-        }, 0);
+        return sum + countPhotosInBladeItems(blades?.[blade]);
     }, 0);
     return total;
+};
+
+const mergeBladeItems = (localItems = [], serverItems = []) => {
+    const localArr = Array.isArray(localItems) ? localItems : [];
+    const serverArr = Array.isArray(serverItems) ? serverItems : [];
+
+    if (!localArr.length) return serverArr;
+    if (!serverArr.length) return localArr;
+
+    const localCount = countPhotosInBladeItems(localArr);
+    const serverCount = countPhotosInBladeItems(serverArr);
+
+    return localCount >= serverCount ? localArr : serverArr;
 };
 
 const mergeTechnicalReports = (serverReports = [], localReports = []) => {
@@ -206,7 +247,7 @@ const mergeTechnicalReports = (serverReports = [], localReports = []) => {
         const localPhotoCount = countPhotosInBlades(localReport.blades);
         const serverPhotoCount = countPhotosInBlades(serverReport.blades);
         const localIsNewer = getTimeValue(localReport.lastModified) > getTimeValue(serverReport.lastModified);
-        const serverIsMoreComplete = serverPhotoCount > localPhotoCount || (serverPhotoCount === localPhotoCount && JSON.stringify(serverReport.blades).length > JSON.stringify(localReport.blades).length);
+        const serverIsMoreComplete = serverPhotoCount > localPhotoCount;
 
         const useLocal = localIsNewer && !serverIsMoreComplete && localReport.synced === false;
 
@@ -217,13 +258,18 @@ const mergeTechnicalReports = (serverReports = [], localReports = []) => {
             ...localReport.info,
         };
 
-        const mergedBlades = {
-            A: useLocal ? (localReport.blades?.A ?? serverReport.blades?.A ?? []) : (serverReport.blades?.A ?? localReport.blades?.A ?? []),
-            B: useLocal ? (localReport.blades?.B ?? serverReport.blades?.B ?? []) : (serverReport.blades?.B ?? localReport.blades?.B ?? []),
-            C: useLocal ? (localReport.blades?.C ?? serverReport.blades?.C ?? []) : (serverReport.blades?.C ?? localReport.blades?.C ?? []),
+        const pickBlade = (localBlade, serverBlade) => {
+            if (useLocal) return mergeBladeItems(localBlade, serverBlade);
+            return mergeBladeItems(serverBlade, localBlade);
         };
 
-        return {
+        const mergedBlades = {
+            A: pickBlade(localReport.blades?.A, serverReport.blades?.A),
+            B: pickBlade(localReport.blades?.B, serverReport.blades?.B),
+            C: pickBlade(localReport.blades?.C, serverReport.blades?.C),
+        };
+
+        const mergedReport = {
             ...serverReport,
             ...localReport,
             title: mergedTitle,
@@ -231,6 +277,8 @@ const mergeTechnicalReports = (serverReports = [], localReports = []) => {
             blades: mergedBlades,
             lastModified: useLocal ? localReport.lastModified : serverReport.lastModified,
         };
+
+        return mergedReport;
     });
 
     localArr.forEach((localReport) => {
@@ -281,7 +329,7 @@ const fetchAndStoreImage = async (photoInput) => {
         if (cached) return cached;
 
         const url = `https://mirodesign.it/off-line/blades-repair/wp-json/blades/v1/image?id=${id}`;
-        const res = await fetch(url);
+        const res = await fetch(url, withAuth({ method: "GET" }));
         if (!res.ok) throw new Error("Errore fetch immagine");
 
         const data = await res.json();
@@ -307,7 +355,7 @@ export const useTechnicalReports = () => {
             const localReports = offlineData ? JSON.parse(offlineData) : [];
             setReports(Array.isArray(localReports) ? localReports.map(normalizeTechnicalReport) : []);
 
-            const res = await fetch(API_REPORT_TECNICI);
+            const res = await fetch(API_REPORT_TECNICI, withAuth({ method: "GET" }));
             if (!res.ok) throw new Error("Errore recupero report tecnici");
             const data = await res.json();
 

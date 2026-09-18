@@ -1,17 +1,17 @@
 import { useEffect } from "react";
 import { syncNow } from "../services/syncService";
 
-export const useSync = () => {
+export const useSync = (enabled = true) => {
     useEffect(() => {
-        // tenta subito la sync
+        if (!enabled) return undefined;
+
         syncNow();
 
-        // quando torni online
         const handler = () => syncNow();
         window.addEventListener("online", handler);
 
         return () => {
             window.removeEventListener("online", handler);
         };
-    }, []);
+    }, [enabled]);
 };

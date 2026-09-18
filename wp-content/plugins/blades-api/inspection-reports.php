@@ -4,13 +4,13 @@ add_action('rest_api_init', function () {
     register_rest_route('blades/v1', '/inspection-reports', [
         'methods' => 'GET',
         'callback' => 'blades_get_inspection_reports',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'blades_auth_require_token',
     ]);
 
     register_rest_route('blades/v1', '/inspection-report/(?P<id>\d+)', [
         'methods' => 'GET',
         'callback' => 'blades_get_inspection_report',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'blades_auth_require_token',
     ]);
 });
 

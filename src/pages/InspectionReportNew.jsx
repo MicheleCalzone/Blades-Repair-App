@@ -5,6 +5,9 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Editor } from "@tinymce/tinymce-react";
 import useInspectionReports from "../hooks/useInspectionReports";
 import hotspotPin from "../assets/hotspot-pin.svg";
+import { withAuth } from "../services/auth";
+
+const TINYMCE_BASE_URL = `${import.meta.env.BASE_URL}tinymce/js/tinymce`;
 
 const emptyDamage = {
     description: "",
@@ -43,6 +46,7 @@ const InspectionReportsNew = () => {
     const [newDamage, setNewDamage] = useState(emptyDamage);
     const [serverPhotos, setServerPhotos] = useState([]);
     const [pageNotice, setPageNotice] = useState(null);
+    const [isSaving, setIsSaving] = useState(false);
 
     const editorConfig = {
         height: 200,
@@ -50,13 +54,13 @@ const InspectionReportsNew = () => {
         plugins: ["advlist", "lists", "link", "image", "code"],
         toolbar: "undo redo | bold italic | bullist numlist | link image | code",
         branding: false,
-        base_url: "/tinymce/js/tinymce",
+        base_url: TINYMCE_BASE_URL,
         suffix: ".min",
         skin: "oxide",
-        skin_url: "/tinymce/js/tinymce/skins/ui/oxide",
-        content_css: "/tinymce/js/tinymce/skins/content/default/content.css",
+        skin_url: `${TINYMCE_BASE_URL}/skins/ui/oxide`,
+        content_css: `${TINYMCE_BASE_URL}/skins/content/default/content.css`,
         license_key: "gpl",
-        tinymce_script_src: "/tinymce/js/tinymce/tinymce.min.js",
+        tinymce_script_src: `${TINYMCE_BASE_URL}/tinymce.min.js`,
     };
 
     const reportToEdit = useMemo(() => (id ? reports.find((r) => String(r.id) === String(id)) : null), [id, reports]);
@@ -140,8 +144,8 @@ const InspectionReportsNew = () => {
     // Import attachments (media) dal server per questo report
     const importAttachments = async () => {
         try {
-            const url = `https://mirodesign.it/off-line/blades-repair/wp-json/wp/v2/media?parent=${id}`;
-            const res = await fetch(url);
+            const url = `https://mirodesign.it/off-line/blades-repair/wp-json/blades/v1/media?parent=${id}`;
+            const res = await fetch(url, withAuth({ method: "GET" }));
             if (!res.ok) throw new Error('Errore fetch media');
             const data = await res.json();
             const urls = Array.isArray(data)
@@ -208,21 +212,34 @@ const InspectionReportsNew = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        const normalizedTitle = (title || "").trim();
-        const finalTitle = normalizedTitle || `Report Ispezione ${new Date().toLocaleDateString("it-IT")}`;
-        const report = {
-            id: reportToEdit?.id || Date.now(),
-            title: finalTitle,
-            info,
-            blades,
-            synced: reportToEdit?.synced || false,
-            lastModified: new Date().toISOString(),
-        };
-        await saveReportOffline(report);
-        setPageNotice({
-            type: 'success',
-            text: reportToEdit ? 'Report aggiornato!' : 'Report salvato!'
-        });
+        if (isSaving) return;
+
+        setIsSaving(true);
+
+        try {
+            const normalizedTitle = (title || "").trim();
+            const finalTitle = normalizedTitle || `Report Ispezione ${new Date().toLocaleDateString("it-IT")}`;
+            const report = {
+                id: reportToEdit?.id || Date.now(),
+                title: finalTitle,
+                info,
+                blades,
+                synced: reportToEdit?.synced || false,
+                lastModified: new Date().toISOString(),
+            };
+            await saveReportOffline(report);
+            setPageNotice({
+                type: 'success',
+                text: reportToEdit ? 'Report aggiornato!' : 'Report salvato!'
+            });
+        } catch (error) {
+            setPageNotice({
+                type: 'error',
+                text: error?.message || 'Errore durante il salvataggio del report',
+            });
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     // Se abbiamo un id ma il report non è trovato (dopo caricamento), mostra avviso
@@ -286,7 +303,7 @@ const InspectionReportsNew = () => {
                 {["A", "B", "C"].map((blade) => (
                     <fieldset key={blade}>
                         <legend>Blade {blade}</legend>
-                        <button type="button" onClick={() => addBladeDamage(blade)}>
+                        <button type="button" onClick={() => addBladeDamage(blade)} className={"btn btn-add-damage"}>
                             + Aggiungi Danno
                         </button>
 
@@ -327,7 +344,13 @@ const InspectionReportsNew = () => {
                 </fieldset>
 
                 <div className="form-actions">
-                    <button type="submit" className="btn btn-save">{reportToEdit ? "Aggiorna Report" : "Salva Report"}</button>
+                    <button type="submit" className="btn btn-save" disabled={isSaving}>
+                        {isSaving ? (
+                            <span className="btn-loader" aria-label="Salvataggio in corso" title="Salvataggio in corso" />
+                        ) : (
+                            reportToEdit ? "Aggiorna Report" : "Salva Report"
+                        )}
+                    </button>
                 </div>
 
                 {pageNotice && (
